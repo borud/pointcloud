@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
 
       - name: Install Linux dependencies
         run: |
@@ -86,7 +86,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
 
       - name: Install Linux dependencies (amd64)
         if: runner.os == 'Linux' && matrix.arch == 'amd64'
