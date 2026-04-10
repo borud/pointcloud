@@ -1,5 +1,5 @@
-// Package draw provides 2D raster drawing primitives.
-package draw
+// Package raster provides 2D raster drawing primitives.
+package raster
 
 import (
 	"image"

@@ -2,21 +2,34 @@ BIN := pointcloud
 PKG := ./...
 CMD := .
 
-.PHONY: all build run test vet fmt tidy clean
+.PHONY: all build run test vet lint revive staticcheck fmt tidy clean
 
-all: build
+all: lint build
 
 build:
-	fyne build -o bin/$(BIN) $(CMD)
+	@echo "*** $@"
+	@fyne build -o bin/$(BIN) $(CMD)
 
 run:
-	go run $(CMD)
+	@echo "*** $@"
+	@go run $(CMD)
 
 test:
-	go test $(PKG)
+	@echo "*** $@"
+	@go test $(PKG)
 
 vet:
-	go vet $(PKG)
+	@echo "*** $@"
+	@go vet $(PKG)
+
+lint: vet revive staticcheck
+
+revive:
+	@echo "*** $@"
+	@revive ./...
+
+staticcheck:
+	@staticcheck ./...
 
 fmt:
 	gofmt -s -w .

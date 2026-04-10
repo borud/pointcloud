@@ -176,7 +176,7 @@ func (c *canvas3d) MouseDown(ev *desktop.MouseEvent) {
 }
 
 // MouseUp implements desktop.Mouseable.
-func (c *canvas3d) MouseUp(ev *desktop.MouseEvent) {
+func (c *canvas3d) MouseUp(_ *desktop.MouseEvent) {
 	c.dragModifier = 0
 }
 

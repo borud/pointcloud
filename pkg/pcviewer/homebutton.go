@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/borud/pointcloud/pkg/draw"
+	"github.com/borud/pointcloud/pkg/raster"
 )
 
 // iconButton is a small, transparent, tappable widget that renders custom
@@ -99,23 +99,23 @@ func drawZoomFitIcon(img *image.RGBA, w, h int) {
 	bLen := s * 0.8 // bracket arm length
 
 	// Top-left corner
-	draw.LineAA(img, cx-s, cy-s, cx-s+bLen, cy-s, outline)
-	draw.LineAA(img, cx-s, cy-s, cx-s, cy-s+bLen, outline)
+	raster.LineAA(img, cx-s, cy-s, cx-s+bLen, cy-s, outline)
+	raster.LineAA(img, cx-s, cy-s, cx-s, cy-s+bLen, outline)
 	// Top-right corner
-	draw.LineAA(img, cx+s, cy-s, cx+s-bLen, cy-s, outline)
-	draw.LineAA(img, cx+s, cy-s, cx+s, cy-s+bLen, outline)
+	raster.LineAA(img, cx+s, cy-s, cx+s-bLen, cy-s, outline)
+	raster.LineAA(img, cx+s, cy-s, cx+s, cy-s+bLen, outline)
 	// Bottom-left corner
-	draw.LineAA(img, cx-s, cy+s, cx-s+bLen, cy+s, outline)
-	draw.LineAA(img, cx-s, cy+s, cx-s, cy+s-bLen, outline)
+	raster.LineAA(img, cx-s, cy+s, cx-s+bLen, cy+s, outline)
+	raster.LineAA(img, cx-s, cy+s, cx-s, cy+s-bLen, outline)
 	// Bottom-right corner
-	draw.LineAA(img, cx+s, cy+s, cx+s-bLen, cy+s, outline)
-	draw.LineAA(img, cx+s, cy+s, cx+s, cy+s-bLen, outline)
+	raster.LineAA(img, cx+s, cy+s, cx+s-bLen, cy+s, outline)
+	raster.LineAA(img, cx+s, cy+s, cx+s, cy+s-bLen, outline)
 
 	// Small inward arrows (dots at center of each edge).
 	arrowColor := color.RGBA{180, 180, 180, 180}
 	aOff := s * 0.35
-	draw.LineAA(img, cx-aOff, cy, cx+aOff, cy, arrowColor)
-	draw.LineAA(img, cx, cy-aOff, cx, cy+aOff, arrowColor)
+	raster.LineAA(img, cx-aOff, cy, cx+aOff, cy, arrowColor)
+	raster.LineAA(img, cx, cy-aOff, cx, cy+aOff, arrowColor)
 }
 
 func drawHomeIcon(img *image.RGBA, w, h int) {
@@ -125,34 +125,34 @@ func drawHomeIcon(img *image.RGBA, w, h int) {
 	s := float64(w) * 0.30
 
 	// Filled roof (triangle).
-	roof := [4]draw.Vec2{
+	roof := [4]raster.Vec2{
 		{X: cx, Y: cy - s*1.3},
 		{X: cx + s*1.2, Y: cy - s*0.05},
 		{X: cx - s*1.2, Y: cy - s*0.05},
 		{X: cx, Y: cy - s*1.3},
 	}
-	draw.FillQuad(img, roof, fill)
-	draw.LineAA(img, roof[0].X, roof[0].Y, roof[1].X, roof[1].Y, outline)
-	draw.LineAA(img, roof[0].X, roof[0].Y, roof[2].X, roof[2].Y, outline)
-	draw.LineAA(img, roof[1].X, roof[1].Y, roof[2].X, roof[2].Y, outline)
+	raster.FillQuad(img, roof, fill)
+	raster.LineAA(img, roof[0].X, roof[0].Y, roof[1].X, roof[1].Y, outline)
+	raster.LineAA(img, roof[0].X, roof[0].Y, roof[2].X, roof[2].Y, outline)
+	raster.LineAA(img, roof[1].X, roof[1].Y, roof[2].X, roof[2].Y, outline)
 
 	// Filled body (rectangle).
-	body := [4]draw.Vec2{
+	body := [4]raster.Vec2{
 		{X: cx - s*0.7, Y: cy - s*0.05},
 		{X: cx + s*0.7, Y: cy - s*0.05},
 		{X: cx + s*0.7, Y: cy + s*0.95},
 		{X: cx - s*0.7, Y: cy + s*0.95},
 	}
-	draw.FillQuad(img, body, fill)
-	draw.QuadOutline(img, body, outline)
+	raster.FillQuad(img, body, fill)
+	raster.QuadOutline(img, body, outline)
 
 	// Door cutout (darker rectangle).
 	door := color.RGBA{60, 60, 60, 180}
-	doorQ := [4]draw.Vec2{
+	doorQ := [4]raster.Vec2{
 		{X: cx - s*0.25, Y: cy + s*0.3},
 		{X: cx + s*0.25, Y: cy + s*0.3},
 		{X: cx + s*0.25, Y: cy + s*0.95},
 		{X: cx - s*0.25, Y: cy + s*0.95},
 	}
-	draw.FillQuad(img, doorQ, door)
+	raster.FillQuad(img, doorQ, door)
 }

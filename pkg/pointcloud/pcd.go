@@ -114,7 +114,7 @@ readData:
 	return pc, nil
 }
 
-func readPCDASCII(br *bufio.Reader, pc *PointCloud, count int, fields []string, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
+func readPCDASCII(br *bufio.Reader, pc *PointCloud, count int, _ []string, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
 	maxIdx := xi
 	if yi > maxIdx {
 		maxIdx = yi

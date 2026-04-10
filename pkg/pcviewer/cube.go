@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/borud/pointcloud/pkg/draw"
+	"github.com/borud/pointcloud/pkg/raster"
 )
 
 // cubeFace defines a face of the orientation cube.
@@ -89,10 +89,10 @@ var cubeCorners = func() [8]snapTarget {
 // orientationCube draws a 3D cube gizmo and handles clicks to snap orientation.
 type orientationCube struct {
 	widget.BaseWidget
-	raster  *canvas.Raster
-	canvas  *canvas3d
-	size    float64
-	onSnap  func()
+	raster *canvas.Raster
+	canvas *canvas3d
+	size   float64
+	onSnap func()
 }
 
 func newOrientationCube(c *canvas3d, onSnap func()) *orientationCube {
@@ -123,8 +123,8 @@ func rotatePoint(p [3]float64, m [9]float64) (float64, float64, float64) {
 	return rx, ry, rz
 }
 
-func projectPoint(px, py, _ float64, cx, cy, scale float64) draw.Vec2 {
-	return draw.Vec2{
+func projectPoint(px, py, _ float64, cx, cy, scale float64) raster.Vec2 {
+	return raster.Vec2{
 		X: px*scale + cx,
 		Y: py*scale + cy,
 	}
@@ -188,17 +188,17 @@ func (oc *orientationCube) draw(w, h int) image.Image {
 
 	for _, fz := range visibleFaces {
 		f := cubeFaces[fz.idx]
-		var projected [4]draw.Vec2
+		var projected [4]raster.Vec2
 		for i, vi := range f.verts {
 			rx, ry, rz := rotatePoint(cubeVerts[vi], m)
 			projected[i] = projectPoint(rx, ry, rz, cx, cy, scale)
 		}
-		draw.FillQuad(img, projected, f.color)
-		draw.QuadOutline(img, projected, color.RGBA{200, 200, 200, 255})
+		raster.FillQuad(img, projected, f.color)
+		raster.QuadOutline(img, projected, color.RGBA{200, 200, 200, 255})
 
 		fcx := (projected[0].X + projected[1].X + projected[2].X + projected[3].X) / 4
 		fcy := (projected[0].Y + projected[1].Y + projected[2].Y + projected[3].Y) / 4
-		draw.Label(img, int(fcx), int(fcy), labelRemap[f.label], color.RGBA{255, 255, 255, 255})
+		raster.Label(img, int(fcx), int(fcy), labelRemap[f.label], color.RGBA{255, 255, 255, 255})
 	}
 
 	axisLen := 1.4
@@ -210,8 +210,8 @@ func (oc *orientationCube) draw(w, h int) image.Image {
 	for i, a := range axes {
 		rx, ry, rz := rotatePoint(a, m)
 		end := projectPoint(rx, ry, rz, cx, cy, scale)
-		draw.Line(img, int(origin.X), int(origin.Y), int(end.X), int(end.Y), axisColors[i])
-		draw.Label(img, int(end.X), int(end.Y)-6, axisLabels[i], axisColors[i])
+		raster.Line(img, int(origin.X), int(origin.Y), int(end.X), int(end.Y), axisColors[i])
+		raster.Label(img, int(end.X), int(end.Y)-6, axisLabels[i], axisColors[i])
 	}
 
 	return img
@@ -238,7 +238,7 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 		if nz > -0.1 {
 			continue
 		}
-		var projected [4]draw.Vec2
+		var projected [4]raster.Vec2
 		fcx, fcy := 0.0, 0.0
 		for j, vi := range f.verts {
 			rx, ry, rz := rotatePoint(cubeVerts[vi], m)
@@ -248,7 +248,7 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 		}
 		fcx /= 4
 		fcy /= 4
-		if draw.PointInQuad(clickX, clickY, projected) {
+		if raster.PointInQuad(clickX, clickY, projected) {
 			dist := math.Hypot(clickX-fcx, clickY-fcy)
 			if dist < bestFaceDist {
 				bestFaceDist = dist

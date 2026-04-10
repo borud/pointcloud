@@ -31,13 +31,13 @@ func QuatFromEulerXY(ax, ay float64) Quat {
 	return qx.Mul(qy)
 }
 
-// Mul returns the Hamilton product a*b (apply b first, then a).
-func (a Quat) Mul(b Quat) Quat {
+// Mul returns the Hamilton product q*b (apply b first, then q).
+func (q Quat) Mul(b Quat) Quat {
 	return Quat{
-		W: a.W*b.W - a.X*b.X - a.Y*b.Y - a.Z*b.Z,
-		X: a.W*b.X + a.X*b.W + a.Y*b.Z - a.Z*b.Y,
-		Y: a.W*b.Y - a.X*b.Z + a.Y*b.W + a.Z*b.X,
-		Z: a.W*b.Z + a.X*b.Y - a.Y*b.X + a.Z*b.W,
+		W: q.W*b.W - q.X*b.X - q.Y*b.Y - q.Z*b.Z,
+		X: q.W*b.X + q.X*b.W + q.Y*b.Z - q.Z*b.Y,
+		Y: q.W*b.Y - q.X*b.Z + q.Y*b.W + q.Z*b.X,
+		Z: q.W*b.Z + q.X*b.Y - q.Y*b.X + q.Z*b.W,
 	}
 }
 
