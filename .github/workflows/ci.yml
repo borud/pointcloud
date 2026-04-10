@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: lint-and-test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: pointcloud
+            convert-binary: xyz-convert
+          - os: macos-latest
+            binary: pointcloud
+            convert-binary: xyz-convert
+          - os: windows-latest
+            binary: pointcloud.exe
+            convert-binary: xyz-convert.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+
+      - name: Build pointcloud
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o bin/${{ matrix.binary }} .
+
+      - name: Build xyz-convert
+        env:
+          CGO_ENABLED: "1"
+        run: go build -o bin/${{ matrix.convert-binary }} ./cmd/xyz-convert
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.os }}
+          path: bin/
