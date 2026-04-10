@@ -71,13 +71,6 @@ jobs:
             binary: pointcloud.exe
             convert-binary: xyz-convert.exe
             cc: ""
-          - os: windows-latest
-            arch: arm64
-            goos: windows
-            binary: pointcloud.exe
-            convert-binary: xyz-convert.exe
-            cc: ""
-            goarch: arm64
 
     runs-on: ${{ matrix.os }}
 
