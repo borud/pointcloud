@@ -100,6 +100,10 @@ func New() *Viewer {
 		}
 	}
 
+	v.canvas.onPointCleared = func() {
+		v.infoLabel.SetText("")
+	}
+
 	v.axisBtn = newTextButton("Y-up", 11, func() {
 		v.canvas.mu.Lock()
 		if v.canvas.up == YUp {

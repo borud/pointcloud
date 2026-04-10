@@ -37,6 +37,7 @@ type canvas3d struct {
 	onOrientationChanged func()
 	onHomeView           func()
 	onPointTapped        func(p pointcloud.Point3D, screenX, screenY float64)
+	onPointCleared       func()
 }
 
 func newCanvas3D() *canvas3d {
@@ -369,5 +370,7 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 
 	if bestIdx >= 0 && bestDist <= maxPickRadius {
 		c.onPointTapped(pts[bestIdx], float64(ev.Position.X), float64(ev.Position.Y))
+	} else if c.onPointCleared != nil {
+		c.onPointCleared()
 	}
 }
