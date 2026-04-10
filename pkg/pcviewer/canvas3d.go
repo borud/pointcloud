@@ -31,6 +31,9 @@ type canvas3d struct {
 
 	dragModifier fyne.KeyModifier
 
+	// Last rendered pixel dimensions (set by draw, read by Tapped).
+	lastPixW, lastPixH int
+
 	onOrientationChanged func()
 	onHomeView           func()
 	onPointTapped        func(p pointcloud.Point3D, screenX, screenY float64)
@@ -87,6 +90,7 @@ func (c *canvas3d) CreateRenderer() fyne.WidgetRenderer {
 }
 
 func (c *canvas3d) draw(w, h int) image.Image {
+	c.lastPixW, c.lastPixH = w, h
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
 	c.mu.Lock()
@@ -165,6 +169,10 @@ func arcballVector(mx, my, w, h float64) [3]float64 {
 // MouseDown implements desktop.Mouseable.
 func (c *canvas3d) MouseDown(ev *desktop.MouseEvent) {
 	c.dragModifier = ev.Modifier
+	// Request focus on any mouse interaction so keyboard shortcuts work.
+	if fyneCanvas := fyne.CurrentApp().Driver().CanvasForObject(c); fyneCanvas != nil {
+		fyneCanvas.Focus(c)
+	}
 }
 
 // MouseUp implements desktop.Mouseable.
@@ -287,21 +295,26 @@ func (c *canvas3d) TypedKey(ev *fyne.KeyEvent) {
 
 // Tapped implements fyne.Tappable — picks the nearest point to the click.
 func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
-	// Request focus so keyboard events work after clicking.
-	if fyneCanvas := fyne.CurrentApp().Driver().CanvasForObject(c); fyneCanvas != nil {
-		fyneCanvas.Focus(c)
-	}
-
 	if c.onPointTapped == nil {
 		return
 	}
 
-	clickX, clickY := float64(ev.Position.X), float64(ev.Position.Y)
+	// Event position is in Fyne points. The draw() function projects into
+	// pixel coordinates. Convert click to pixel space so the projection
+	// matches exactly.
 	size := c.Size()
-	w, h := float64(size.Width), float64(size.Height)
-	if w < 1 || h < 1 {
+	pointW, pointH := float64(size.Width), float64(size.Height)
+	if pointW < 1 || pointH < 1 {
 		return
 	}
+
+	pixW, pixH := float64(c.lastPixW), float64(c.lastPixH)
+	if pixW < 1 || pixH < 1 {
+		return
+	}
+	scaleX, scaleY := pixW/pointW, pixH/pointH
+	clickPX := float64(ev.Position.X) * scaleX
+	clickPY := float64(ev.Position.Y) * scaleY
 
 	c.mu.Lock()
 	m := c.orientation.ToMatrix()
@@ -311,11 +324,13 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	pts := c.points
 	c.mu.Unlock()
 
-	centerX, centerY := w/2+panX, h/2+panY
+	// Use pixel center — same as draw().
+	centerX, centerY := pixW/2+panX, pixH/2+panY
 
 	bestDist := math.MaxFloat64
 	bestIdx := -1
-	const maxPickRadius = 5.0
+	// Pick radius in pixels. Points are single-pixel, so be generous.
+	maxPickRadius := 10.0 * scaleX
 
 	for i, p := range pts {
 		px, py, pz := p.X, p.Y, p.Z
@@ -334,8 +349,8 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 		sx := (rx/dist)*zoom + centerX
 		sy := (ry/dist)*zoom + centerY
 
-		dx := sx - clickX
-		dy := sy - clickY
+		dx := sx - clickPX
+		dy := sy - clickPY
 		d := math.Sqrt(dx*dx + dy*dy)
 		if d < bestDist {
 			bestDist = d
@@ -344,6 +359,6 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	}
 
 	if bestIdx >= 0 && bestDist <= maxPickRadius {
-		c.onPointTapped(pts[bestIdx], clickX, clickY)
+		c.onPointTapped(pts[bestIdx], float64(ev.Position.X), float64(ev.Position.Y))
 	}
 }
