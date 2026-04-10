@@ -11,6 +11,7 @@ import (
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	normalize := flag.Bool("normalize", false, "center and scale points to [-1, 1]")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: xyz-convert [flags] <input.xyz> <output.ply>\n\n")
@@ -18,6 +19,11 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("xyz-convert", Version)
+		return
+	}
 
 	if flag.NArg() != 2 {
 		flag.Usage()

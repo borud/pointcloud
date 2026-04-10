@@ -1,10 +1,12 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   lint-and-test:
@@ -34,27 +36,32 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: amd64
+            goos: linux
             binary: pointcloud
             convert-binary: xyz-convert
             cc: gcc
           - os: ubuntu-latest
             arch: arm64
+            goos: linux
             binary: pointcloud
             convert-binary: xyz-convert
             cc: aarch64-linux-gnu-gcc
             goarch: arm64
           - os: macos-latest
             arch: arm64
+            goos: darwin
             binary: pointcloud
             convert-binary: xyz-convert
             cc: ""
           - os: windows-latest
             arch: amd64
+            goos: windows
             binary: pointcloud.exe
             convert-binary: xyz-convert.exe
             cc: ""
           - os: windows-latest
             arch: arm64
+            goos: windows
             binary: pointcloud.exe
             convert-binary: xyz-convert.exe
             cc: ""
@@ -85,13 +92,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libgl1-mesa-dev:arm64 libxkbcommon-dev:arm64 xorg-dev:arm64
 
+      - name: Set version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build pointcloud
         env:
           CGO_ENABLED: "1"
           GOARCH: ${{ matrix.goarch || '' }}
           CC: ${{ matrix.cc || '' }}
         run: |
-          go build -ldflags "-X main.Version=dev-${GITHUB_SHA::8}" \
+          go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
             -o bin/${{ matrix.binary }} .
 
       - name: Build xyz-convert
@@ -100,11 +112,43 @@ jobs:
           GOARCH: ${{ matrix.goarch || '' }}
           CC: ${{ matrix.cc || '' }}
         run: |
-          go build -ldflags "-X main.Version=dev-${GITHUB_SHA::8}" \
+          go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
             -o bin/${{ matrix.convert-binary }} ./cmd/xyz-convert
 
-      - name: Upload artifacts
+      - name: Create archive
+        shell: bash
+        run: |
+          cd bin
+          ARCHIVE="pointcloud-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.arch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a "../${ARCHIVE}.zip" .
+          else
+            tar czf "../${ARCHIVE}.tar.gz" .
+          fi
+
+      - name: Upload archive
         uses: actions/upload-artifact@v5
         with:
-          name: binaries-${{ matrix.os }}-${{ matrix.arch }}
-          path: bin/
+          name: archive-${{ matrix.goos }}-${{ matrix.arch }}
+          path: |
+            pointcloud-*.tar.gz
+            pointcloud-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v5
+        with:
+          pattern: archive-*
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            pointcloud-*.tar.gz
+            pointcloud-*.zip

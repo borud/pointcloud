@@ -44,9 +44,15 @@ func (t *tealTheme) Size(name fyne.ThemeSizeName) float32 {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
 	pwd := flag.String("pwd", "", "starting directory for the file selector")
 	axis := flag.String("axis", "zup", "up axis: yup or zup")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("pointcloud", Version)
+		return
+	}
 
 	myApp := app.NewWithID("no.borud.pointcloud")
 	myApp.Settings().SetTheme(&tealTheme{})
