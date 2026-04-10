@@ -11,17 +11,17 @@ import (
 
 // Point3D represents a point in 3D space with optional color.
 type Point3D struct {
-	X, Y, Z float64
-	R, G, B uint8
+	X, Y, Z  float64
+	R, G, B  uint8
 	HasColor bool
 }
 
 // PointCloud holds a collection of 3D points with bounding box metadata.
 type PointCloud struct {
-	Points                     []Point3D
-	MinX, MinY, MinZ           float64
-	MaxX, MaxY, MaxZ           float64
-	boundsComputed             bool
+	Points           []Point3D
+	MinX, MinY, MinZ float64
+	MaxX, MaxY, MaxZ float64
+	boundsComputed   bool
 }
 
 // ComputeBounds calculates the bounding box of the point cloud.

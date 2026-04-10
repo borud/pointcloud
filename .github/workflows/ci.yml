@@ -21,8 +21,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
 
+      - name: Install linters
+        run: |
+          go install github.com/mgechev/revive@latest
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
       - name: Vet
         run: go vet ./...
+
+      - name: Revive
+        run: revive ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
 
       - name: Test
         run: go test ./...
@@ -94,9 +105,11 @@ jobs:
           printf "Types: deb\nURIs: http://ports.ubuntu.com/\nSuites: %s %s-updates\nComponents: main restricted universe multiverse\nArchitectures: arm64\n" "$CODENAME" "$CODENAME" | sudo tee /etc/apt/sources.list.d/arm64-ports.sources
 
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libgl1-mesa-dev:arm64 libxkbcommon-dev:arm64 xorg-dev:arm64
+          sudo apt-get install -y gcc-aarch64-linux-gnu libgl1-mesa-dev:arm64 libxkbcommon-dev:arm64 \
+            libx11-dev:arm64 libxcursor-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 libxi-dev:arm64 libxxf86vm-dev:arm64
 
       - name: Build pointcloud
+        shell: bash
         env:
           CGO_ENABLED: "1"
           GOARCH: ${{ matrix.goarch || '' }}
@@ -106,6 +119,7 @@ jobs:
             -o bin/${{ matrix.binary }} .
 
       - name: Build xyz-convert
+        shell: bash
         env:
           CGO_ENABLED: "1"
           GOARCH: ${{ matrix.goarch || '' }}

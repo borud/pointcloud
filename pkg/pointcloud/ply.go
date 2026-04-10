@@ -122,7 +122,7 @@ func ReadPLY(r io.Reader) (*PointCloud, error) {
 	return pc, nil
 }
 
-func readPLYASCII(br *bufio.Reader, pc *PointCloud, count int, props []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool) error {
+func readPLYASCII(br *bufio.Reader, pc *PointCloud, count int, _ []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool) error {
 	maxIdx := xi
 	if yi > maxIdx {
 		maxIdx = yi

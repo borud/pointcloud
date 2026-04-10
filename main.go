@@ -1,3 +1,4 @@
+// Package main implements the Point Cloud Viewer application.
 package main
 
 import (
@@ -26,7 +27,7 @@ type tealTheme struct{}
 
 func (t *tealTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	if name == theme.ColorNameBackground {
-		return color.RGBA{52, 58, 64, 255}
+		return color.RGBA{128, 128, 128, 255}
 	}
 	return theme.DefaultTheme().Color(name, variant)
 }
@@ -65,7 +66,7 @@ func main() {
 
 	statusLabel := widget.NewLabel("No file loaded")
 
-toolbar := widget.NewToolbar(
+	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.FolderOpenIcon(), func() {
 			dlg := dialog.NewFileOpen(func(rc fyne.URIReadCloser, err error) {
 				if err != nil {

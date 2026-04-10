@@ -206,4 +206,3 @@ func (v *Viewer) SetBackgroundColor(c color.RGBA) {
 	v.canvas.mu.Unlock()
 	v.canvas.raster.Refresh()
 }
-
