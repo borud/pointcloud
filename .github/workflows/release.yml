@@ -121,19 +121,23 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build pointcloud
+        shell: bash
         env:
           CGO_ENABLED: "1"
           GOARCH: ${{ matrix.goarch || '' }}
           CC: ${{ matrix.cc || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.arch == 'arm64' && runner.os == 'Linux' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
         run: |
           go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
             -o bin/${{ matrix.binary }} .
 
       - name: Build xyz-convert
+        shell: bash
         env:
           CGO_ENABLED: "1"
           GOARCH: ${{ matrix.goarch || '' }}
           CC: ${{ matrix.cc || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.arch == 'arm64' && runner.os == 'Linux' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
         run: |
           go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
             -o bin/${{ matrix.convert-binary }} ./cmd/xyz-convert
