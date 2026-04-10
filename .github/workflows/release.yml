@@ -32,6 +32,7 @@ jobs:
   build:
     needs: lint-and-test
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -86,9 +87,19 @@ jobs:
         if: runner.os == 'Linux' && matrix.arch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list.d/*.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ $(lsb_release -cs) main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ $(lsb_release -cs)-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+
+          # Pin existing Ubuntu sources to amd64 only (DEB822 format on 24.04+)
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/^Architectures:.*/Architectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources
+            if ! grep -q '^Architectures:' /etc/apt/sources.list.d/ubuntu.sources; then
+              sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+          fi
+
+          # Add arm64 ports repository
+          CODENAME=$(lsb_release -cs)
+          printf "Types: deb\nURIs: http://ports.ubuntu.com/\nSuites: %s %s-updates\nComponents: main restricted universe multiverse\nArchitectures: arm64\n" "$CODENAME" "$CODENAME" | sudo tee /etc/apt/sources.list.d/arm64-ports.sources
+
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libgl1-mesa-dev:arm64 libxkbcommon-dev:arm64 xorg-dev:arm64
 
