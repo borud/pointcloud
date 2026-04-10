@@ -23,7 +23,7 @@ jobs:
 
       - name: Install linters
         run: |
-          go install github.com/mgechev/revive@latest
+          go install github.com/mgechev/revive@v1.14.1
           go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Vet
