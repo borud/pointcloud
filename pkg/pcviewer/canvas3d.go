@@ -109,7 +109,16 @@ func (c *canvas3d) draw(w, h int) image.Image {
 		img.Pix[i+3] = bg.A
 	}
 
-	centerX, centerY := float64(w)/2+panX, float64(h)/2+panY
+	// panX/panY are in Fyne DIP; scale to pixel space.
+	size := c.Size()
+	scaleX, scaleY := 1.0, 1.0
+	if size.Width > 0 {
+		scaleX = float64(w) / float64(size.Width)
+	}
+	if size.Height > 0 {
+		scaleY = float64(h) / float64(size.Height)
+	}
+	centerX, centerY := float64(w)/2+panX*scaleX, float64(h)/2+panY*scaleY
 
 	for _, p := range pts {
 		px, py, pz := p.X, p.Y, p.Z
@@ -324,8 +333,8 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	pts := c.points
 	c.mu.Unlock()
 
-	// Use pixel center — same as draw().
-	centerX, centerY := pixW/2+panX, pixH/2+panY
+	// Use pixel center — same as draw(). Scale pan from DIP to pixels.
+	centerX, centerY := pixW/2+panX*scaleX, pixH/2+panY*scaleY
 
 	bestDist := math.MaxFloat64
 	bestIdx := -1
