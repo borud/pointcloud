@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/borud/pointcloud/pkg/pointcloud"
+	"github.com/borud/pointcloud"
 )
 
 func main() {

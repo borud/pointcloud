@@ -1,6 +1,6 @@
 BIN := pointcloud
 PKG := ./...
-CMD := .
+CMD := ./cmd/pointcloud-viewer
 
 .PHONY: all build run test vet lint revive staticcheck fmt tidy clean
 

@@ -1,22 +1,20 @@
-package pcviewer
+package pointcloud
 
 import (
 	"image"
 	"image/color"
 	"math/rand/v2"
 	"testing"
-
-	"github.com/borud/pointcloud/pkg/pointcloud"
 )
 
 // generatePoints creates a deterministic synthetic point cloud with a mix
 // of colored and uncolored points (50/50).
-func generatePoints(n int) []pointcloud.Point3D {
+func generatePoints(n int) []Point3D {
 	rng := rand.New(rand.NewPCG(42, 0))
 
-	pts := make([]pointcloud.Point3D, n)
+	pts := make([]Point3D, n)
 	for i := range pts {
-		pts[i] = pointcloud.Point3D{
+		pts[i] = Point3D{
 			X: rng.Float64()*2 - 1,
 			Y: rng.Float64()*2 - 1,
 			Z: rng.Float64()*2 - 1,
@@ -35,7 +33,7 @@ func generatePoints(n int) []pointcloud.Point3D {
 // elements (not axis-aligned, not home).
 var testOrientation = QuatFromEulerXY(0.7, 1.2)
 
-func setupCanvas(pts []pointcloud.Point3D) *canvas3d {
+func setupCanvas(pts []Point3D) *canvas3d {
 	c := &canvas3d{
 		orientation: testOrientation,
 		matrixDirty: true,

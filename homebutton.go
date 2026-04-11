@@ -1,4 +1,4 @@
-package pcviewer
+package pointcloud
 
 import (
 	"image"
@@ -8,7 +8,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/borud/pointcloud/pkg/raster"
+	"github.com/borud/pointcloud/internal/raster"
 )
 
 // iconButton is a small, transparent, tappable widget that renders custom

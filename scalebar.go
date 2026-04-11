@@ -1,4 +1,4 @@
-package pcviewer
+package pointcloud
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/borud/pointcloud/pkg/raster"
+	"github.com/borud/pointcloud/internal/raster"
 )
 
 // scaleBar is an overlay widget that displays a map-style ruler showing the
