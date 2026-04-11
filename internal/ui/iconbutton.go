@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"math"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -83,6 +84,44 @@ func DrawZoomFitIcon(img *image.RGBA, w, h int) {
 	aOff := s * 0.35
 	raster.LineAA(img, cx-aOff, cy, cx+aOff, cy, arrowColor)
 	raster.LineAA(img, cx, cy-aOff, cx, cy+aOff, arrowColor)
+}
+
+// DrawFlythroughIcon draws a simple eye/camera icon suggesting first-person view.
+func DrawFlythroughIcon(img *image.RGBA, w, h int) {
+	outline := color.RGBA{200, 200, 200, 200}
+	cx, cy := float64(w)/2, float64(h)/2
+	s := float64(w) * 0.30
+
+	// Draw an eye shape: two arcs meeting at left and right points.
+	// Top arc
+	steps := 8
+	for i := range steps {
+		t0 := float64(i) / float64(steps)
+		t1 := float64(i+1) / float64(steps)
+		x0 := cx - s + t0*2*s
+		y0 := cy - s*0.6*math.Sin(t0*math.Pi)
+		x1 := cx - s + t1*2*s
+		y1 := cy - s*0.6*math.Sin(t1*math.Pi)
+		raster.LineAA(img, x0, y0, x1, y1, outline)
+	}
+	// Bottom arc
+	for i := range steps {
+		t0 := float64(i) / float64(steps)
+		t1 := float64(i+1) / float64(steps)
+		x0 := cx - s + t0*2*s
+		y0 := cy + s*0.6*math.Sin(t0*math.Pi)
+		x1 := cx - s + t1*2*s
+		y1 := cy + s*0.6*math.Sin(t1*math.Pi)
+		raster.LineAA(img, x0, y0, x1, y1, outline)
+	}
+	// Pupil dot (filled circle approximation).
+	pupilR := s * 0.25
+	for i := range 12 {
+		t0 := float64(i) / 12.0 * 2 * math.Pi
+		t1 := float64(i+1) / 12.0 * 2 * math.Pi
+		raster.LineAA(img, cx+pupilR*math.Cos(t0), cy+pupilR*math.Sin(t0),
+			cx+pupilR*math.Cos(t1), cy+pupilR*math.Sin(t1), outline)
+	}
 }
 
 // DrawHomeIcon draws a simple house icon.

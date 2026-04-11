@@ -33,6 +33,8 @@ type config struct {
 	fpsColor             *color.RGBA
 	fpsStyle             *fyne.TextStyle
 	fpsSize              *float32
+	showFlythroughButton *bool
+	flythroughEnabled    *bool
 }
 
 // CubeColors configures the colors of the orientation cube.
@@ -214,4 +216,14 @@ func quatOr(p *Quat, def Quat) Quat {
 		return *p
 	}
 	return def
+}
+
+// WithFlythroughButton controls whether the flythrough toggle button is displayed.
+func WithFlythroughButton(show bool) Option {
+	return func(cfg *config) { cfg.showFlythroughButton = &show }
+}
+
+// WithFlythroughEnabled sets whether flythrough mode is initially active.
+func WithFlythroughEnabled(on bool) Option {
+	return func(cfg *config) { cfg.flythroughEnabled = &on }
 }

@@ -50,6 +50,27 @@ func (q Quat) Normalize() Quat {
 	return Quat{q.X / l, q.Y / l, q.Z / l, q.W / l}
 }
 
+// Conjugate returns the conjugate of the quaternion, which for unit
+// quaternions is also the inverse rotation.
+func (q Quat) Conjugate() Quat {
+	return Quat{X: -q.X, Y: -q.Y, Z: -q.Z, W: q.W}
+}
+
+// RotateVec3 rotates a 3D vector by the quaternion using the formula q*v*q^-1.
+func (q Quat) RotateVec3(v [3]float64) [3]float64 {
+	// Optimized quaternion-vector rotation (avoids full quaternion multiply).
+	// t = 2 * cross(q.xyz, v)
+	tx := 2 * (q.Y*v[2] - q.Z*v[1])
+	ty := 2 * (q.Z*v[0] - q.X*v[2])
+	tz := 2 * (q.X*v[1] - q.Y*v[0])
+	// result = v + q.w*t + cross(q.xyz, t)
+	return [3]float64{
+		v[0] + q.W*tx + (q.Y*tz - q.Z*ty),
+		v[1] + q.W*ty + (q.Z*tx - q.X*tz),
+		v[2] + q.W*tz + (q.X*ty - q.Y*tx),
+	}
+}
+
 // ToMatrix returns a row-major 3x3 rotation matrix.
 func (q Quat) ToMatrix() [9]float64 {
 	xx, yy, zz := q.X*q.X, q.Y*q.Y, q.Z*q.Z

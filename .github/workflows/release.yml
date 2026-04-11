@@ -54,26 +54,22 @@ jobs:
             arch: amd64
             goos: linux
             binary: pointcloud
-            convert-binary: xyz-convert
             cc: gcc
           - os: ubuntu-latest
             arch: arm64
             goos: linux
             binary: pointcloud
-            convert-binary: xyz-convert
             cc: aarch64-linux-gnu-gcc
             goarch: arm64
           - os: macos-latest
             arch: arm64
             goos: darwin
             binary: pointcloud
-            convert-binary: xyz-convert
             cc: ""
           - os: windows-latest
             arch: amd64
             goos: windows
             binary: pointcloud.exe
-            convert-binary: xyz-convert.exe
             cc: ""
 
     runs-on: ${{ matrix.os }}
@@ -129,17 +125,6 @@ jobs:
         run: |
           go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
             -o bin/${{ matrix.binary }} .
-
-      - name: Build xyz-convert
-        shell: bash
-        env:
-          CGO_ENABLED: "1"
-          GOARCH: ${{ matrix.goarch || '' }}
-          CC: ${{ matrix.cc || '' }}
-          PKG_CONFIG_PATH: ${{ matrix.arch == 'arm64' && runner.os == 'Linux' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
-        run: |
-          go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" \
-            -o bin/${{ matrix.convert-binary }} ./cmd/xyz-convert
 
       - name: Create archive
         shell: bash
