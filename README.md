@@ -1,10 +1,12 @@
 # Point Cloud Viewer
 
+![Gopher](images/gopher-small.png)
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/borud/pointcloud.svg)](https://pkg.go.dev/github.com/borud/pointcloud)
 
 A simple point cloud viewer built with [Fyne](https://fyne.io/) and OpenGL. Reads PLY, PCD, PTS, and XYZ files and renders them as interactive 3D point clouds with mouse-controlled rotation and zoom.
 
-![Screenshot](screenshot.png)
+![Screenshot](images/screenshot.png)
 
 ## Features
 
@@ -21,8 +23,22 @@ A simple point cloud viewer built with [Fyne](https://fyne.io/) and OpenGL. Read
 
 ## Installation
 
+### Library
+
+To use the viewer widget in your own Fyne application:
+
 ```sh
 go get github.com/borud/pointcloud
+```
+
+### Demo application
+
+Pre-built binaries for Linux (amd64, arm64), macOS (arm64), and Windows (amd64) are available on the [releases page](https://github.com/borud/pointcloud/releases).
+
+Or build from source:
+
+```sh
+go install github.com/borud/pointcloud/cmd/pointcloud@latest
 ```
 
 ## Using the widget
@@ -35,28 +51,28 @@ The `Viewer` is a standard Fyne widget that you can embed in any Fyne applicatio
 package main
 
 import (
- "log"
+    "log"
 
- "fyne.io/fyne/v2/app"
- "github.com/borud/pointcloud"
+    "fyne.io/fyne/v2/app"
+    "github.com/borud/pointcloud"
 )
 
 func main() {
- myApp := app.New()
- w := myApp.NewWindow("Point Cloud")
+    myApp := app.New()
+    w := myApp.NewWindow("Point Cloud")
 
- v := pointcloud.New()
+    v := pointcloud.New()
 
- pc, err := pointcloud.ReadFile("model.ply")
- if err != nil {
-  log.Fatal(err)
- }
- pc.Normalize()
- v.SetScale(pc.NormScale)
- v.SetPoints(pc.Points)
+    pc, err := pointcloud.ReadFile("model.ply")
+    if err != nil {
+        log.Fatal(err)
+    }
+    pc.Normalize()
+    v.SetScale(pc.NormScale)
+    v.SetPoints(pc.Points)
 
- w.SetContent(v)
- w.ShowAndRun()
+    w.SetContent(v)
+    w.ShowAndRun()
 }
 ```
 
@@ -66,16 +82,16 @@ Use functional options to customize appearance when creating the viewer.
 
 ```go
 v := pointcloud.New(
- pointcloud.WithBackgroundColor(color.RGBA{30, 30, 30, 255}),
- pointcloud.WithDefaultPointColor(color.RGBA{255, 150, 255, 255}),
- pointcloud.WithOrientationCube(true),
- pointcloud.WithHomeButton(true),
- pointcloud.WithZoomFitButton(true),
- pointcloud.WithInfoLabel(true),
- pointcloud.WithScaleBar(true),
- pointcloud.WithScaleUnit("m"),
- pointcloud.WithFPS(true),
- pointcloud.WithMaxZoomOutFraction(0.3),
+    pointcloud.WithBackgroundColor(color.RGBA{30, 30, 30, 255}),
+    pointcloud.WithDefaultPointColor(color.RGBA{255, 150, 255, 255}),
+    pointcloud.WithOrientationCube(true),
+    pointcloud.WithHomeButton(true),
+    pointcloud.WithZoomFitButton(true),
+    pointcloud.WithInfoLabel(true),
+    pointcloud.WithScaleBar(true),
+    pointcloud.WithScaleUnit("m"),
+    pointcloud.WithFPS(true),
+    pointcloud.WithMaxZoomOutFraction(0.3),
 )
 v.SetUpAxis(pointcloud.ZUp)
 ```
@@ -102,12 +118,12 @@ You can construct a `PointCloud` programmatically instead of reading from a file
 
 ```go
 pc := &pointcloud.PointCloud{
- Points: []pointcloud.Point3D{
-  {X: 0, Y: 0, Z: 0, R: 255, G: 0, B: 0, HasColor: true},
-  {X: 1, Y: 0, Z: 0, R: 0, G: 255, B: 0, HasColor: true},
-  {X: 0, Y: 1, Z: 0, R: 0, G: 0, B: 255, HasColor: true},
-  {X: 0, Y: 0, Z: 1, R: 255, G: 255, B: 0, HasColor: true},
- },
+    Points: []pointcloud.Point3D{
+        {X: 0, Y: 0, Z: 0, R: 255, G: 0, B: 0, HasColor: true},
+        {X: 1, Y: 0, Z: 0, R: 0, G: 255, B: 0, HasColor: true},
+        {X: 0, Y: 1, Z: 0, R: 0, G: 0, B: 255, HasColor: true},
+        {X: 0, Y: 0, Z: 1, R: 255, G: 255, B: 0, HasColor: true},
+    },
 }
 pc.ComputeBounds()
 pc.Normalize()
@@ -150,6 +166,44 @@ f, _ := os.Create("output.ply")
 defer f.Close()
 pointcloud.WritePLY(f, pc)
 ```
+
+## Controls
+
+The viewer has two camera modes: **orbit** (default) and **flythrough** (first-person). Toggle between them with the `g` key or the eye button in the toolbar.
+
+### Orbit mode
+
+| Input | Action |
+|---|---|
+| Drag | Arcball rotation |
+| Shift+Drag | Pan |
+| Scroll wheel | Zoom in/out |
+| Click | Pick nearest point (shows coordinates in info label) |
+| `h` | Reset to home view |
+| `f` | Zoom to fit all points |
+| `+` / `-` | Zoom in / out |
+| Arrow keys | Rotate in 5-degree steps |
+| `g` | Enter flythrough mode |
+
+### Flythrough mode
+
+In flythrough mode the camera moves freely through the point cloud using FPS-style controls.
+
+| Input | Action |
+|---|---|
+| `W` / `S` or Up / Down | Move forward / backward |
+| `A` / `D` or Left / Right | Strafe left / right |
+| Space | Move up (world space) |
+| `Q` | Move down (world space) |
+| Drag | Mouse look |
+| Scroll wheel | Adjust movement speed |
+| `g` | Return to orbit mode |
+| Escape | Return to orbit mode |
+| `h` | Return to orbit mode and reset home view |
+
+### Orientation cube
+
+Click a face, edge midpoint, or corner of the orientation cube to snap the view to that direction.
 
 ## Benchmarking
 
