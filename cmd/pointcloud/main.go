@@ -362,6 +362,10 @@ func main() {
 		v,
 	)
 
+	// onFlythroughChanged is set after flyCheck is created and used by
+	// rebuildViewer to re-wire the callback on the new viewer.
+	var onFlythroughChanged func(bool)
+
 	// rebuildViewer replaces the viewer in the layout, preserving the
 	// current orientation, zoom, and pan.
 	rebuildViewer := func() {
@@ -374,6 +378,11 @@ func main() {
 		v.SetOrientation(oldOrientation)
 		v.SetZoom(oldZoom)
 		v.SetPan(oldPanX, oldPanY)
+
+		// Re-wire flythrough callback to sync the checkbox.
+		if onFlythroughChanged != nil {
+			v.OnFlythroughChanged = onFlythroughChanged
+		}
 
 		viewerArea.Objects[0] = v
 		viewerArea.Refresh()
@@ -623,10 +632,22 @@ func main() {
 	})
 	lodCheck.SetChecked(lodEnabled)
 
+	flyCheck := widget.NewCheck("Flythrough mode (G)", func(on bool) {
+		v.SetFlythrough(on)
+	})
+	flyCheck.SetChecked(false)
+
+	// Sync checkbox when flythrough is toggled via keyboard ('G' / Esc).
+	onFlythroughChanged = func(on bool) {
+		fyne.Do(func() { flyCheck.SetChecked(on) })
+	}
+	v.OnFlythroughChanged = onFlythroughChanged
+
 	renderSection := widget.NewCard("Rendering", "",
 		container.NewVBox(
 			withTooltip(zupCheck, "Treat Z as up axis (typical for LiDAR and surveying data)"),
 			withTooltip(lodCheck, "Reduce point count during mouse interaction for faster frame rates"),
+			withTooltip(flyCheck, "First-person camera: WASD to move, mouse to look, scroll to adjust speed"),
 		),
 	)
 
@@ -735,6 +756,7 @@ func main() {
 		fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
 		zupCheck.SetChecked(true)
 		lodCheck.SetChecked(false)
+		flyCheck.SetChecked(false)
 
 		rebuildViewer()
 	})

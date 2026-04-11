@@ -41,14 +41,20 @@ const (
 type Viewer struct {
 	widget.BaseWidget
 
-	canvas    *canvas3d
-	cube      *orientationCube
-	home      *ui.IconButton
-	zoomFit   *ui.IconButton
-	infoLabel *canvas.Text
-	fpsLabel  *canvas.Text
-	scaleBar  *ui.ScaleBar
-	content   *fyne.Container
+	canvas       *canvas3d
+	cube         *orientationCube
+	home         *ui.IconButton
+	zoomFit      *ui.IconButton
+	flyBtn       *ui.IconButton
+	infoLabel    *canvas.Text
+	fpsLabel     *canvas.Text
+	speedLabel   *canvas.Text
+	scaleBar     *ui.ScaleBar
+	content      *fyne.Container
+
+	// OnFlythroughChanged is called when flythrough mode is toggled,
+	// either via the UI button, the 'G' key, or SetFlythrough.
+	OnFlythroughChanged func(on bool)
 
 	// FPS tracking state.
 	fpsFrameCount int
@@ -84,6 +90,13 @@ func New(opts ...Option) *Viewer {
 	if showZoomFit {
 		v.zoomFit = ui.NewIconButton(28, 28, ui.DrawZoomFitIcon, func() {
 			v.canvas.zoomToExtents()
+		})
+	}
+
+	showFlyBtn := boolOr(cfg.showFlythroughButton, true)
+	if showFlyBtn {
+		v.flyBtn = ui.NewIconButton(28, 28, ui.DrawFlythroughIcon, func() {
+			v.canvas.setFlythrough(!v.canvas.flyMode)
 		})
 	}
 
@@ -160,6 +173,22 @@ func New(opts ...Option) *Viewer {
 		}
 	}
 
+	// Speed indicator — hidden by default, shown in flythrough mode.
+	v.speedLabel = canvas.NewText("", color.RGBA{200, 200, 200, 255})
+	v.speedLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	v.speedLabel.TextSize = 12
+	v.speedLabel.Text = "" // hidden until flythrough activates
+
+	v.canvas.onSpeedChanged = func(mult float64) {
+		if v.speedLabel == nil {
+			return
+		}
+		fyne.Do(func() {
+			v.speedLabel.Text = formatSpeed(mult)
+			v.speedLabel.Refresh()
+		})
+	}
+
 	v.canvas.onZoomChanged = func() {
 		if v.scaleBar != nil {
 			fyne.Do(func() { v.scaleBar.Raster.Refresh() })
@@ -186,8 +215,34 @@ func New(opts ...Option) *Viewer {
 		v.infoLabel.Refresh()
 	}
 
+	// Track flythrough state changes to update the button and speed label.
+	v.canvas.onFlythroughChanged = func(on bool) {
+		if v.flyBtn != nil {
+			fyne.Do(func() { v.flyBtn.Raster.Refresh() })
+		}
+		if v.cube != nil {
+			fyne.Do(func() { v.cube.raster.Refresh() })
+		}
+		if v.speedLabel != nil {
+			fyne.Do(func() {
+				if on {
+					v.speedLabel.Text = formatSpeed(1.0)
+				} else {
+					v.speedLabel.Text = ""
+				}
+				v.speedLabel.Refresh()
+			})
+		}
+		if v.OnFlythroughChanged != nil {
+			v.OnFlythroughChanged(on)
+		}
+	}
+
 	// Build the overlay controls.
 	btnItems := []fyne.CanvasObject{layout.NewSpacer()}
+	if v.flyBtn != nil {
+		btnItems = append(btnItems, container.New(layout.NewGridWrapLayout(fyne.NewSize(28, 28)), v.flyBtn))
+	}
 	if v.zoomFit != nil {
 		btnItems = append(btnItems, container.New(layout.NewGridWrapLayout(fyne.NewSize(28, 28)), v.zoomFit))
 	}
@@ -218,9 +273,16 @@ func New(opts ...Option) *Viewer {
 
 	topRight := container.NewHBox(layout.NewSpacer(), controls)
 
-	var topLeft fyne.CanvasObject
+	var topLeftItems []fyne.CanvasObject
 	if v.fpsLabel != nil {
-		topLeft = container.NewVBox(v.fpsLabel)
+		topLeftItems = append(topLeftItems, v.fpsLabel)
+	}
+	if v.speedLabel != nil {
+		topLeftItems = append(topLeftItems, v.speedLabel)
+	}
+	var topLeft fyne.CanvasObject
+	if len(topLeftItems) > 0 {
+		topLeft = container.NewVBox(topLeftItems...)
 	}
 
 	overlay := container.New(
@@ -234,6 +296,12 @@ func New(opts ...Option) *Viewer {
 
 	v.content = container.NewStack(v.canvas, overlay)
 	v.ExtendBaseWidget(v)
+
+	// Apply initial flythrough state if configured.
+	if boolOr(cfg.flythroughEnabled, false) {
+		v.canvas.setFlythrough(true)
+	}
+
 	return v
 }
 
@@ -533,4 +601,24 @@ func (v *Viewer) MaxZoomOutFraction() float64 {
 	v.canvas.mu.Lock()
 	defer v.canvas.mu.Unlock()
 	return v.canvas.maxZoomOutFraction
+}
+
+// SetFlythrough enables or disables flythrough (first-person) camera mode.
+func (v *Viewer) SetFlythrough(on bool) {
+	v.canvas.setFlythrough(on)
+}
+
+// IsFlythrough returns true if flythrough mode is currently active.
+func (v *Viewer) IsFlythrough() bool {
+	v.canvas.mu.Lock()
+	defer v.canvas.mu.Unlock()
+	return v.canvas.flyMode
+}
+
+// formatSpeed returns a human-readable speed multiplier string.
+func formatSpeed(mult float64) string {
+	if mult >= 1.0 {
+		return fmt.Sprintf("Speed: %.0fx", mult)
+	}
+	return fmt.Sprintf("Speed: %.2fx", mult)
 }
