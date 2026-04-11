@@ -22,26 +22,66 @@ import (
 	"github.com/borud/pointcloud/pkg/pointcloud"
 )
 
-// tealTheme wraps the default dark theme with a teal background.
-type tealTheme struct{}
+// --- defaults ---
 
-func (t *tealTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	if name == theme.ColorNameBackground {
-		return color.RGBA{128, 128, 128, 255}
+var (
+	defaultBgColor        = color.RGBA{0, 0, 0, 255}
+	defaultPointColor     = color.RGBA{255, 150, 255, 255}
+	defaultInfoLabelColor = color.RGBA{255, 255, 255, 255}
+	defaultInfoLabelStyle = fyne.TextStyle{Monospace: true}
+)
+
+// colorSwatch creates a clickable colored rectangle that opens a color picker.
+func colorSwatch(c color.RGBA, w fyne.Window, onChange func(color.RGBA)) *fyne.Container {
+	rect := canvas.NewRectangle(c)
+	rect.SetMinSize(fyne.NewSize(24, 24))
+	rect.CornerRadius = 4
+	rect.StrokeColor = color.RGBA{180, 180, 180, 255}
+	rect.StrokeWidth = 1
+
+	btn := newTappable(func() {
+		dlg := dialog.NewColorPicker("Pick Color", "", func(picked color.Color) {
+			r, g, b, a := picked.RGBA()
+			rgba := color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
+			rect.FillColor = rgba
+			rect.Refresh()
+			onChange(rgba)
+		}, w)
+		dlg.Advanced = true
+		dlg.SetColor(rect.FillColor)
+		dlg.Show()
+	})
+
+	return container.NewStack(rect, btn)
+}
+
+// colorRow creates a label + color swatch row.
+func colorRow(label string, c color.RGBA, w fyne.Window, onChange func(color.RGBA)) (*fyne.Container, *canvas.Rectangle) {
+	swatch := colorSwatch(c, w, onChange)
+	rect := swatch.Objects[0].(*canvas.Rectangle)
+	return container.NewHBox(swatch, widget.NewLabel(label)), rect
+}
+
+// tappable is a transparent widget that handles Tapped events.
+type tappable struct {
+	widget.BaseWidget
+	onTap func()
+}
+
+func newTappable(onTap func()) *tappable {
+	t := &tappable{onTap: onTap}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappable) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+}
+
+func (t *tappable) Tapped(_ *fyne.PointEvent) {
+	if t.onTap != nil {
+		t.onTap()
 	}
-	return theme.DefaultTheme().Color(name, variant)
-}
-
-func (t *tealTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return theme.DefaultTheme().Font(style)
-}
-
-func (t *tealTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
-	return theme.DefaultTheme().Icon(name)
-}
-
-func (t *tealTheme) Size(name fyne.ThemeSizeName) float32 {
-	return theme.DefaultTheme().Size(name)
 }
 
 func main() {
@@ -56,15 +96,118 @@ func main() {
 	}
 
 	myApp := app.NewWithID("no.borud.pointcloud")
-	myApp.Settings().SetTheme(&tealTheme{})
 	myWindow := myApp.NewWindow("Point Cloud Viewer")
 
-	v := pcviewer.New()
+	// Current state for viewer reconstruction.
+	bgColor := defaultBgColor
+	pointColor := defaultPointColor
+	infoLabelColor := defaultInfoLabelColor
+	infoLabelStyle := defaultInfoLabelStyle
+	cubeColors := pcviewer.DefaultCubeColors()
+	showCube := true
+	showHome := true
+	showZoomFit := true
+	showInfo := true
+	showScaleBar := true
+	showFPS := false
+	fpsColor := color.RGBA{200, 200, 200, 255}
+	fpsStyle := fyne.TextStyle{Monospace: true}
+	scaleBarColor := color.RGBA{200, 200, 200, 255}
+	scaleUnit := ""
+	scaleUnitScale := 1.0
+	var currentNormScale float64
+
+	// Points storage so we can reload after viewer rebuild.
+	var currentPoints []pointcloud.Point3D
+	var currentUpAxis pcviewer.UpAxis
 	if strings.EqualFold(*axis, "zup") {
-		v.SetUpAxis(pcviewer.ZUp)
+		currentUpAxis = pcviewer.ZUp
 	}
 
+	// Build the viewer with current settings.
+	buildViewer := func() *pcviewer.Viewer {
+		v := pcviewer.New(
+			pcviewer.WithBackgroundColor(bgColor),
+			pcviewer.WithDefaultPointColor(pointColor),
+			pcviewer.WithInfoLabelColor(infoLabelColor),
+			pcviewer.WithInfoLabelStyle(infoLabelStyle),
+			pcviewer.WithCubeColors(cubeColors),
+			pcviewer.WithOrientationCube(showCube),
+			pcviewer.WithHomeButton(showHome),
+			pcviewer.WithZoomFitButton(showZoomFit),
+			pcviewer.WithInfoLabel(showInfo),
+			pcviewer.WithScaleBar(showScaleBar),
+			pcviewer.WithScaleBarColor(scaleBarColor),
+			pcviewer.WithScaleUnit(scaleUnit),
+			pcviewer.WithScaleUnitScale(scaleUnitScale),
+			pcviewer.WithFPS(showFPS),
+			pcviewer.WithFPSColor(fpsColor),
+			pcviewer.WithFPSStyle(fpsStyle),
+		)
+		v.SetUpAxis(currentUpAxis)
+		if currentNormScale > 0 {
+			v.SetScale(currentNormScale)
+		}
+		if len(currentPoints) > 0 {
+			v.SetPointsPreserveView(currentPoints)
+		}
+		return v
+	}
+
+	v := buildViewer()
 	statusLabel := widget.NewLabel("No file loaded")
+
+	const pad float32 = 40
+	viewerArea := container.New(
+		layout.NewCustomPaddedLayout(pad, pad, pad, pad),
+		v,
+	)
+
+	// rebuildViewer replaces the viewer in the layout, preserving the
+	// current orientation, zoom, and pan.
+	rebuildViewer := func() {
+		oldOrientation := v.Orientation()
+		oldZoom := v.Zoom()
+		oldPanX, oldPanY := v.Pan()
+
+		v = buildViewer()
+
+		v.SetOrientation(oldOrientation)
+		v.SetZoom(oldZoom)
+		v.SetPan(oldPanX, oldPanY)
+
+		viewerArea.Objects[0] = v
+		viewerArea.Refresh()
+	}
+
+	// --- Toolbar ---
+	axisLabel := "Y-up"
+	if currentUpAxis == pcviewer.ZUp {
+		axisLabel = "Z-up"
+	}
+	axisBtn := widget.NewButton(axisLabel, nil)
+	axisBtn.OnTapped = func() {
+		if v.GetUpAxis() == pcviewer.ZUp {
+			currentUpAxis = pcviewer.YUp
+			v.SetUpAxis(pcviewer.YUp)
+			axisBtn.SetText("Y-up")
+		} else {
+			currentUpAxis = pcviewer.ZUp
+			v.SetUpAxis(pcviewer.ZUp)
+			axisBtn.SetText("Z-up")
+		}
+	}
+
+	lodBtn := widget.NewButton("LOD", nil)
+	lodBtn.OnTapped = func() {
+		enabled := !v.LODEnabled()
+		v.SetLODEnabled(enabled)
+		if enabled {
+			lodBtn.SetText("LOD")
+		} else {
+			lodBtn.SetText("lod")
+		}
+	}
 
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.FolderOpenIcon(), func() {
@@ -90,6 +233,9 @@ func main() {
 				}
 
 				pc.Normalize()
+				currentNormScale = pc.NormScale
+				currentPoints = pc.Points
+				v.SetScale(pc.NormScale)
 				v.SetPoints(pc.Points)
 				statusLabel.SetText(fmt.Sprintf("%s - %d points", fname, len(pc.Points)))
 			}, myWindow)
@@ -106,27 +252,306 @@ func main() {
 		}),
 	)
 
-	// Inner rounded rectangle sits behind the viewer.
-	innerBg := canvas.NewRectangle(color.RGBA{0, 0, 0, 255})
-	innerBg.CornerRadius = 12
+	// --- Settings panel ---
+	// We collect all swatch rectangles so the reset button can update them.
+	type swatchEntry struct {
+		rect     *canvas.Rectangle
+		getColor func() color.RGBA
+	}
+	var swatches []swatchEntry
 
-	const pad float32 = 40
-	const radius float32 = 12
-	viewerArea := container.NewStack(
-		container.New(
-			layout.NewCustomPaddedLayout(pad-radius, pad-radius, pad-radius, pad-radius),
-			innerBg,
-		),
-		container.New(
-			layout.NewCustomPaddedLayout(pad, pad, pad, pad),
-			v,
+	trackSwatch := func(rect *canvas.Rectangle, getColor func() color.RGBA) {
+		swatches = append(swatches, swatchEntry{rect, getColor})
+	}
+
+	// Canvas colors section.
+	bgRow, bgRect := colorRow("WithBackgroundColor", bgColor, myWindow, func(c color.RGBA) {
+		bgColor = c
+		v.SetBackgroundColor(c)
+	})
+	trackSwatch(bgRect, func() color.RGBA { return bgColor })
+
+	ptRow, ptRect := colorRow("WithDefaultPointColor", pointColor, myWindow, func(c color.RGBA) {
+		pointColor = c
+		v.SetDefaultPointColor(c)
+	})
+	trackSwatch(ptRect, func() color.RGBA { return pointColor })
+
+	infoRow, infoRect := colorRow("WithInfoLabelColor", infoLabelColor, myWindow, func(c color.RGBA) {
+		infoLabelColor = c
+		v.SetInfoLabelColor(c)
+	})
+	trackSwatch(infoRect, func() color.RGBA { return infoLabelColor })
+
+	sbColorRow, sbColorRect := colorRow("WithScaleBarColor", scaleBarColor, myWindow, func(c color.RGBA) {
+		scaleBarColor = c
+		v.SetScaleBarColor(c)
+	})
+	trackSwatch(sbColorRect, func() color.RGBA { return scaleBarColor })
+
+	canvasSection := widget.NewCard("Canvas", "",
+		container.NewVBox(bgRow, ptRow, infoRow, sbColorRow),
+	)
+
+	// Info label style section.
+	fontOptions := []string{"Regular", "Monospace", "Bold", "Italic", "Bold Italic"}
+	styleFromName := func(name string) fyne.TextStyle {
+		switch name {
+		case "Monospace":
+			return fyne.TextStyle{Monospace: true}
+		case "Bold":
+			return fyne.TextStyle{Bold: true}
+		case "Italic":
+			return fyne.TextStyle{Italic: true}
+		case "Bold Italic":
+			return fyne.TextStyle{Bold: true, Italic: true}
+		default:
+			return fyne.TextStyle{}
+		}
+	}
+	nameFromStyle := func(s fyne.TextStyle) string {
+		switch {
+		case s.Monospace:
+			return "Monospace"
+		case s.Bold && s.Italic:
+			return "Bold Italic"
+		case s.Bold:
+			return "Bold"
+		case s.Italic:
+			return "Italic"
+		default:
+			return "Regular"
+		}
+	}
+
+	fontSelect := widget.NewSelect(fontOptions, func(name string) {
+		infoLabelStyle = styleFromName(name)
+		v.SetInfoLabelStyle(infoLabelStyle)
+	})
+	fontSelect.SetSelected(nameFromStyle(infoLabelStyle))
+
+	fontSection := widget.NewCard("Info Label", "",
+		container.NewVBox(
+			widget.NewLabel("WithInfoLabelStyle"),
+			fontSelect,
 		),
 	)
 
-	top := container.NewBorder(nil, nil, nil, statusLabel, toolbar)
-	content := container.NewBorder(top, nil, nil, nil, viewerArea)
+	// Cube colors section.
+	faceLabels := [6]string{"Faces[0] Z+", "Faces[1] Z-", "Faces[2] X+", "Faces[3] X-", "Faces[4] Y+", "Faces[5] Y-"}
+	var cubeColorRows []fyne.CanvasObject
+	for idx := range 6 {
+		i := idx
+		row, rect := colorRow(faceLabels[i], cubeColors.Faces[i], myWindow, func(c color.RGBA) {
+			cubeColors.Faces[i] = c
+			v.SetCubeColors(cubeColors)
+		})
+		trackSwatch(rect, func() color.RGBA { return cubeColors.Faces[i] })
+		cubeColorRows = append(cubeColorRows, row)
+	}
 
-	myWindow.SetContent(content)
-	myWindow.Resize(fyne.NewSize(800, 600))
+	edgeRow, edgeRect := colorRow("EdgeColor", cubeColors.EdgeColor, myWindow, func(c color.RGBA) {
+		cubeColors.EdgeColor = c
+		v.SetCubeColors(cubeColors)
+	})
+	trackSwatch(edgeRect, func() color.RGBA { return cubeColors.EdgeColor })
+	cubeColorRows = append(cubeColorRows, edgeRow)
+
+	lblRow, lblRect := colorRow("LabelColor", cubeColors.LabelColor, myWindow, func(c color.RGBA) {
+		cubeColors.LabelColor = c
+		v.SetCubeColors(cubeColors)
+	})
+	trackSwatch(lblRect, func() color.RGBA { return cubeColors.LabelColor })
+	cubeColorRows = append(cubeColorRows, lblRow)
+
+	axisNames := [3]string{"AxisColors[0] X", "AxisColors[1] Y", "AxisColors[2] Z"}
+	for idx := range 3 {
+		i := idx
+		row, rect := colorRow(axisNames[i], cubeColors.AxisColors[i], myWindow, func(c color.RGBA) {
+			cubeColors.AxisColors[i] = c
+			v.SetCubeColors(cubeColors)
+		})
+		trackSwatch(rect, func() color.RGBA { return cubeColors.AxisColors[i] })
+		cubeColorRows = append(cubeColorRows, row)
+	}
+
+	cubeSection := widget.NewCard("CubeColors", "",
+		container.NewVBox(cubeColorRows...),
+	)
+
+	// Zoom-out fraction slider.
+	zoomOutFraction := 0.2
+	zoomOutLabel := widget.NewLabel(fmt.Sprintf("MaxZoomOutFraction: %.0f%%", zoomOutFraction*100))
+	zoomOutSlider := widget.NewSlider(0.05, 1.0)
+	zoomOutSlider.Step = 0.05
+	zoomOutSlider.Value = zoomOutFraction
+	zoomOutSlider.OnChanged = func(val float64) {
+		zoomOutFraction = val
+		zoomOutLabel.SetText(fmt.Sprintf("MaxZoomOutFraction: %.0f%%", val*100))
+		v.SetMaxZoomOutFraction(val)
+	}
+
+	zoomSection := widget.NewCard("Zoom", "",
+		container.NewVBox(zoomOutLabel, zoomOutSlider),
+	)
+
+	// Visibility toggles (these rebuild the viewer).
+	cubeCheck := widget.NewCheck("WithOrientationCube", func(on bool) {
+		showCube = on
+		rebuildViewer()
+	})
+	cubeCheck.SetChecked(showCube)
+
+	homeCheck := widget.NewCheck("WithHomeButton", func(on bool) {
+		showHome = on
+		rebuildViewer()
+	})
+	homeCheck.SetChecked(showHome)
+
+	zoomFitCheck := widget.NewCheck("WithZoomFitButton", func(on bool) {
+		showZoomFit = on
+		rebuildViewer()
+	})
+	zoomFitCheck.SetChecked(showZoomFit)
+
+	infoCheck := widget.NewCheck("WithInfoLabel", func(on bool) {
+		showInfo = on
+		rebuildViewer()
+	})
+	infoCheck.SetChecked(showInfo)
+
+	fpsCheck := widget.NewCheck("WithFPS", func(on bool) {
+		showFPS = on
+		rebuildViewer()
+	})
+	fpsCheck.SetChecked(showFPS)
+
+	visSection := widget.NewCard("Visibility", "",
+		container.NewVBox(cubeCheck, homeCheck, zoomFitCheck, infoCheck, fpsCheck),
+	)
+
+	// FPS display settings.
+	fpsColorRow, fpsColorRect := colorRow("WithFPSColor", fpsColor, myWindow, func(c color.RGBA) {
+		fpsColor = c
+		v.SetFPSColor(c)
+	})
+	trackSwatch(fpsColorRect, func() color.RGBA { return fpsColor })
+
+	fpsFontSelect := widget.NewSelect(fontOptions, func(name string) {
+		fpsStyle = styleFromName(name)
+		v.SetFPSStyle(fpsStyle)
+	})
+	fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
+
+	fpsSection := widget.NewCard("FPS Display", "",
+		container.NewVBox(
+			fpsColorRow,
+			widget.NewLabel("WithFPSStyle"),
+			fpsFontSelect,
+		),
+	)
+
+	// Scale bar settings.
+	unitEntry := widget.NewEntry()
+	unitEntry.SetPlaceHolder("unit (e.g. m)")
+	unitEntry.SetText(scaleUnit)
+	unitEntry.OnChanged = func(s string) {
+		scaleUnit = s
+		v.SetScaleUnit(s)
+	}
+
+	unitScaleEntry := widget.NewEntry()
+	unitScaleEntry.SetPlaceHolder("multiplier (e.g. 1000)")
+	unitScaleEntry.SetText(fmt.Sprintf("%g", scaleUnitScale))
+	unitScaleEntry.OnChanged = func(s string) {
+		var val float64
+		if _, err := fmt.Sscanf(s, "%f", &val); err == nil && val > 0 {
+			scaleUnitScale = val
+			v.SetScaleUnitScale(val)
+		}
+	}
+
+	scaleBarCheck := widget.NewCheck("WithScaleBar", func(on bool) {
+		showScaleBar = on
+		rebuildViewer()
+	})
+	scaleBarCheck.SetChecked(showScaleBar)
+
+	scaleSection := widget.NewCard("Scale Bar", "",
+		container.NewVBox(
+			scaleBarCheck,
+			widget.NewLabel("WithScaleUnit"),
+			unitEntry,
+			widget.NewLabel("WithScaleUnitScale"),
+			unitScaleEntry,
+		),
+	)
+
+	// Reset all to defaults.
+	resetBtn := widget.NewButton("Reset All to Defaults", func() {
+		bgColor = defaultBgColor
+		pointColor = defaultPointColor
+		infoLabelColor = defaultInfoLabelColor
+		infoLabelStyle = defaultInfoLabelStyle
+		cubeColors = pcviewer.DefaultCubeColors()
+		showCube = true
+		showHome = true
+		showZoomFit = true
+		showInfo = true
+		showScaleBar = true
+		showFPS = false
+		fpsColor = color.RGBA{200, 200, 200, 255}
+		fpsStyle = fyne.TextStyle{Monospace: true}
+		scaleBarColor = color.RGBA{200, 200, 200, 255}
+		scaleUnit = ""
+		scaleUnitScale = 1.0
+
+		// Update swatch colors.
+		for _, s := range swatches {
+			s.rect.FillColor = s.getColor()
+			s.rect.Refresh()
+		}
+
+		// Update font selector and zoom slider.
+		fontSelect.SetSelected(nameFromStyle(infoLabelStyle))
+		zoomOutFraction = 0.2
+		zoomOutSlider.Value = 0.2
+		zoomOutSlider.Refresh()
+		zoomOutLabel.SetText(fmt.Sprintf("MaxZoomOutFraction: %.0f%%", zoomOutFraction*100))
+
+		// Update scale bar entries.
+		unitEntry.SetText("")
+		unitScaleEntry.SetText("1")
+
+		// Update checkboxes.
+		cubeCheck.SetChecked(true)
+		homeCheck.SetChecked(true)
+		zoomFitCheck.SetChecked(true)
+		infoCheck.SetChecked(true)
+		scaleBarCheck.SetChecked(true)
+		fpsCheck.SetChecked(false)
+		fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
+
+		rebuildViewer()
+	})
+
+	settingsContent := container.NewVBox(canvasSection, fontSection, zoomSection, scaleSection, cubeSection, visSection, fpsSection, resetBtn)
+	settingsScroll := container.NewVScroll(settingsContent)
+	settingsScroll.SetMinSize(fyne.NewSize(240, 0))
+
+	settingsPanel := container.New(
+		layout.NewCustomPaddedLayout(pad, pad, pad, pad),
+		settingsScroll,
+	)
+
+	top := container.NewBorder(nil, nil, nil,
+		container.NewHBox(axisBtn, lodBtn, statusLabel),
+		toolbar,
+	)
+
+	mainContent := container.NewBorder(top, nil, nil, settingsPanel, viewerArea)
+
+	myWindow.SetContent(mainContent)
+	myWindow.Resize(fyne.NewSize(1100, 700))
 	myWindow.ShowAndRun()
 }
