@@ -153,7 +153,7 @@ jobs:
           fi
 
       - name: Upload archive
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: archive-${{ matrix.goos }}-${{ matrix.arch }}
           path: |
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all archives
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: archive-*
           merge-multiple: true
