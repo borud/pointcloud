@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
@@ -59,6 +62,75 @@ func colorRow(label string, c color.RGBA, w fyne.Window, onChange func(color.RGB
 	swatch := colorSwatch(c, w, onChange)
 	rect := swatch.Objects[0].(*canvas.Rectangle)
 	return container.NewHBox(swatch, widget.NewLabel(label)), rect
+}
+
+// withTooltip wraps a widget so that hovering over it shows a tooltip
+// after a short delay.
+func withTooltip(obj fyne.CanvasObject, text string) fyne.CanvasObject {
+	h := newHoverOverlay(text)
+	return container.NewStack(obj, h)
+}
+
+// hoverOverlay is a transparent widget that detects mouse hover and
+// shows a popup tooltip. It is stacked on top of the real widget.
+type hoverOverlay struct {
+	widget.BaseWidget
+	text  string
+	popup *widget.PopUp
+	timer *time.Timer
+}
+
+func newHoverOverlay(text string) *hoverOverlay {
+	h := &hoverOverlay{text: text}
+	h.ExtendBaseWidget(h)
+	return h
+}
+
+func (h *hoverOverlay) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+}
+
+// MouseIn implements desktop.Hoverable.
+func (h *hoverOverlay) MouseIn(ev *desktop.MouseEvent) {
+	if h.timer != nil {
+		h.timer.Stop()
+	}
+	pos := ev.AbsolutePosition
+	h.timer = time.AfterFunc(500*time.Millisecond, func() {
+		fyne.Do(func() {
+			h.showPopup(pos)
+		})
+	})
+}
+
+// MouseMoved implements desktop.Hoverable.
+func (h *hoverOverlay) MouseMoved(_ *desktop.MouseEvent) {}
+
+// MouseOut implements desktop.Hoverable.
+func (h *hoverOverlay) MouseOut() {
+	if h.timer != nil {
+		h.timer.Stop()
+	}
+	if h.popup != nil {
+		h.popup.Hide()
+		h.popup = nil
+	}
+}
+
+func (h *hoverOverlay) showPopup(pos fyne.Position) {
+	c := fyne.CurrentApp().Driver().CanvasForObject(h)
+	if c == nil {
+		return
+	}
+	label := canvas.NewText(h.text, color.RGBA{230, 230, 230, 255})
+	label.TextSize = 11
+	bg := canvas.NewRectangle(color.RGBA{50, 50, 50, 230})
+	bg.CornerRadius = 4
+	content := container.NewStack(bg,
+		container.New(layout.NewCustomPaddedLayout(4, 4, 6, 6), label),
+	)
+	h.popup = widget.NewPopUp(content, c)
+	h.popup.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+20))
 }
 
 // tappable is a transparent widget that handles Tapped events.
@@ -262,7 +334,7 @@ func main() {
 	})
 	trackSwatch(sbColorRect, func() color.RGBA { return scaleBarColor })
 
-	canvasSection := widget.NewCard("Canvas", "Background, point, and label colors",
+	canvasSection := widget.NewCard("Canvas", "",
 		container.NewVBox(bgRow, ptRow, infoRow, sbColorRow),
 	)
 
@@ -303,7 +375,7 @@ func main() {
 	})
 	fontSelect.SetSelected(nameFromStyle(infoLabelStyle))
 
-	fontSection := widget.NewCard("Info Label", "Style of the point info text",
+	fontSection := widget.NewCard("Info Label", "",
 		container.NewVBox(
 			widget.NewLabel("WithInfoLabelStyle"),
 			fontSelect,
@@ -348,7 +420,7 @@ func main() {
 		cubeColorRows = append(cubeColorRows, row)
 	}
 
-	cubeSection := widget.NewCard("CubeColors", "Colors for the orientation cube faces, edges, and axes",
+	cubeSection := widget.NewCard("CubeColors", "",
 		container.NewVBox(cubeColorRows...),
 	)
 
@@ -364,7 +436,7 @@ func main() {
 		v.SetMaxZoomOutFraction(val)
 	}
 
-	zoomSection := widget.NewCard("Zoom", "How far the user can zoom out",
+	zoomSection := widget.NewCard("Zoom", "",
 		container.NewVBox(zoomOutLabel, zoomOutSlider),
 	)
 
@@ -399,8 +471,14 @@ func main() {
 	})
 	fpsCheck.SetChecked(showFPS)
 
-	visSection := widget.NewCard("Visibility", "Show or hide overlay elements",
-		container.NewVBox(cubeCheck, homeCheck, zoomFitCheck, infoCheck, fpsCheck),
+	visSection := widget.NewCard("Visibility", "",
+		container.NewVBox(
+			withTooltip(cubeCheck, "Show the 3D orientation cube in the top-right corner"),
+			withTooltip(homeCheck, "Show the home button to reset the view"),
+			withTooltip(zoomFitCheck, "Show the zoom-to-fit button"),
+			withTooltip(infoCheck, "Show point coordinates when clicking a point"),
+			withTooltip(fpsCheck, "Show frames-per-second counter in the top-left corner"),
+		),
 	)
 
 	// Rendering settings.
@@ -420,12 +498,10 @@ func main() {
 	})
 	lodCheck.SetChecked(lodEnabled)
 
-	renderSection := widget.NewCard("Rendering", "Controls that affect how the point cloud is rendered",
+	renderSection := widget.NewCard("Rendering", "",
 		container.NewVBox(
-			zupCheck,
-			widget.NewLabel("  Treat Z as up axis (typical for LiDAR/surveying data)"),
-			lodCheck,
-			widget.NewLabel("  Reduce point count during interaction for faster frame rates"),
+			withTooltip(zupCheck, "Treat Z as up axis (typical for LiDAR and surveying data)"),
+			withTooltip(lodCheck, "Reduce point count during mouse interaction for faster frame rates"),
 		),
 	)
 
@@ -442,7 +518,7 @@ func main() {
 	})
 	fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
 
-	fpsSection := widget.NewCard("FPS Display", "Color and style of the FPS counter",
+	fpsSection := widget.NewCard("FPS Display", "",
 		container.NewVBox(
 			fpsColorRow,
 			widget.NewLabel("WithFPSStyle"),
@@ -476,7 +552,7 @@ func main() {
 	})
 	scaleBarCheck.SetChecked(showScaleBar)
 
-	scaleSection := widget.NewCard("Scale Bar", "Unit and multiplier for the scale indicator",
+	scaleSection := widget.NewCard("Scale Bar", "",
 		container.NewVBox(
 			scaleBarCheck,
 			widget.NewLabel("WithScaleUnit"),
