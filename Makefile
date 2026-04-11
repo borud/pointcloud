@@ -9,6 +9,7 @@ all: lint build
 build:
 	@echo "*** $@"
 	@fyne build -o bin/$(BIN) $(CMD)
+	@go build -o bin/pcbench ./cmd/pcbench
 
 run:
 	@echo "*** $@"

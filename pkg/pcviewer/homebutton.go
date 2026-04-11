@@ -6,7 +6,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/borud/pointcloud/pkg/raster"
@@ -49,44 +48,6 @@ func (ib *iconButton) MinSize() fyne.Size {
 func (ib *iconButton) Tapped(_ *fyne.PointEvent) {
 	if ib.onTap != nil {
 		ib.onTap()
-	}
-}
-
-// textButton is a small, transparent, tappable widget that renders a text
-// label using Fyne's native font rendering for smooth anti-aliased text.
-type textButton struct {
-	widget.BaseWidget
-	label   *canvas.Text
-	onTap   func()
-	content *fyne.Container
-}
-
-func newTextButton(text string, size float32, onTap func()) *textButton {
-	tb := &textButton{onTap: onTap}
-	tb.label = canvas.NewText(text, color.RGBA{180, 180, 180, 255})
-	tb.label.TextSize = size
-	tb.label.TextStyle = fyne.TextStyle{Bold: true}
-	tb.content = container.NewCenter(tb.label)
-	tb.ExtendBaseWidget(tb)
-	return tb
-}
-
-func (tb *textButton) SetText(text string) {
-	tb.label.Text = text
-	tb.label.Refresh()
-}
-
-func (tb *textButton) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(tb.content)
-}
-
-func (tb *textButton) MinSize() fyne.Size {
-	return fyne.NewSize(40, 28)
-}
-
-func (tb *textButton) Tapped(_ *fyne.PointEvent) {
-	if tb.onTap != nil {
-		tb.onTap()
 	}
 }
 

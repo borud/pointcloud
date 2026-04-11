@@ -93,13 +93,15 @@ type orientationCube struct {
 	canvas *canvas3d
 	size   float64
 	onSnap func()
+	colors CubeColors
 }
 
-func newOrientationCube(c *canvas3d, onSnap func()) *orientationCube {
+func newOrientationCube(c *canvas3d, cc CubeColors, onSnap func()) *orientationCube {
 	oc := &orientationCube{
 		canvas: c,
 		size:   105,
 		onSnap: onSnap,
+		colors: cc,
 	}
 	oc.raster = canvas.NewRaster(oc.draw)
 	oc.ExtendBaseWidget(oc)
@@ -193,25 +195,24 @@ func (oc *orientationCube) draw(w, h int) image.Image {
 			rx, ry, rz := rotatePoint(cubeVerts[vi], m)
 			projected[i] = projectPoint(rx, ry, rz, cx, cy, scale)
 		}
-		raster.FillQuad(img, projected, f.color)
-		raster.QuadOutline(img, projected, color.RGBA{200, 200, 200, 255})
+		raster.FillQuad(img, projected, oc.colors.Faces[fz.idx])
+		raster.QuadOutline(img, projected, oc.colors.EdgeColor)
 
 		fcx := (projected[0].X + projected[1].X + projected[2].X + projected[3].X) / 4
 		fcy := (projected[0].Y + projected[1].Y + projected[2].Y + projected[3].Y) / 4
-		raster.Label(img, int(fcx), int(fcy), labelRemap[f.label], color.RGBA{255, 255, 255, 255})
+		raster.Label(img, int(fcx), int(fcy), labelRemap[f.label], oc.colors.LabelColor)
 	}
 
 	axisLen := 1.4
 	axes := [3][3]float64{{axisLen, 0, 0}, {0, axisLen, 0}, {0, 0, axisLen}}
-	axisColors := [3]color.RGBA{{255, 80, 80, 255}, {80, 255, 80, 255}, {80, 80, 255, 255}}
 	ox, oy, oz := rotatePoint([3]float64{0, 0, 0}, m)
 	origin := projectPoint(ox, oy, oz, cx, cy, scale)
 
 	for i, a := range axes {
 		rx, ry, rz := rotatePoint(a, m)
 		end := projectPoint(rx, ry, rz, cx, cy, scale)
-		raster.Line(img, int(origin.X), int(origin.Y), int(end.X), int(end.Y), axisColors[i])
-		raster.Label(img, int(end.X), int(end.Y)-6, axisLabels[i], axisColors[i])
+		raster.Line(img, int(origin.X), int(origin.Y), int(end.X), int(end.Y), oc.colors.AxisColors[i])
+		raster.Label(img, int(end.X), int(end.Y)-6, axisLabels[i], oc.colors.AxisColors[i])
 	}
 
 	return img
@@ -305,6 +306,7 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 	if hit {
 		oc.canvas.mu.Lock()
 		oc.canvas.orientation = snapQ
+		oc.canvas.matrixDirty = true
 		oc.canvas.mu.Unlock()
 		oc.canvas.raster.Refresh()
 		oc.raster.Refresh()

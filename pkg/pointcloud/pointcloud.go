@@ -22,6 +22,12 @@ type PointCloud struct {
 	MinX, MinY, MinZ float64
 	MaxX, MaxY, MaxZ float64
 	boundsComputed   bool
+
+	// NormScale is the scale factor applied by Normalize (2.0/maxDim).
+	// Zero if Normalize has not been called.
+	NormScale float64
+	// NormCenter is the center point subtracted during Normalize.
+	NormCenter [3]float64
 }
 
 // ComputeBounds calculates the bounding box of the point cloud.
@@ -76,6 +82,9 @@ func (pc *PointCloud) Normalize() {
 		maxDim = 1
 	}
 	scale := 2.0 / maxDim
+
+	pc.NormScale = scale
+	pc.NormCenter = [3]float64{cx, cy, cz}
 
 	for i := range pc.Points {
 		pc.Points[i].X = (pc.Points[i].X - cx) * scale
