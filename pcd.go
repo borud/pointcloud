@@ -115,22 +115,12 @@ readData:
 }
 
 func readPCDASCII(br *bufio.Reader, pc *PointCloud, count int, _ []string, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
-	maxIdx := xi
-	if yi > maxIdx {
-		maxIdx = yi
-	}
-	if zi > maxIdx {
-		maxIdx = zi
-	}
-	if hasRGB && rgbi > maxIdx {
-		maxIdx = rgbi
+	maxIdx := maxFieldIndex(xi, yi, zi)
+	if hasRGB {
+		maxIdx = maxFieldIndex(maxIdx, rgbi)
 	}
 	if hasSeparateColor {
-		for _, idx := range []int{ri, gi, bi} {
-			if idx > maxIdx {
-				maxIdx = idx
-			}
-		}
+		maxIdx = maxFieldIndex(maxIdx, ri, gi, bi)
 	}
 
 	for i := 0; i < count; i++ {

@@ -1,4 +1,4 @@
-package pointcloud
+package ui
 
 import (
 	"fmt"
@@ -14,69 +14,74 @@ import (
 	"github.com/borud/pointcloud/internal/raster"
 )
 
-// scaleBar is an overlay widget that displays a map-style ruler showing the
+// ScaleBar is an overlay widget that displays a map-style ruler showing the
 // distance in original data units at the current zoom level.
-type scaleBar struct {
+type ScaleBar struct {
 	widget.BaseWidget
-	raster    *canvas.Raster
-	label     *canvas.Text
-	content   *fyne.Container
-	canvas3d  *canvas3d
-	color     color.RGBA
-	unit      string
-	unitScale float64
-	normScale float64
+	Raster      *canvas.Raster
+	Label       *canvas.Text
+	content     *fyne.Container
+	zoomFn      func() float64
+	Color       color.RGBA
+	Unit        string
+	UnitScale   float64
+	NormScale   float64
+	framebuffer *image.RGBA
 }
 
-func newScaleBar(c3d *canvas3d, barColor color.RGBA, unit string, unitScale float64) *scaleBar {
+// NewScaleBar creates a new scale bar widget. The zoomFn callback is called
+// during each draw to read the current zoom level.
+func NewScaleBar(zoomFn func() float64, barColor color.RGBA, unit string, unitScale float64) *ScaleBar {
 	if unitScale <= 0 {
 		unitScale = 1.0
 	}
-	sb := &scaleBar{
-		canvas3d:  c3d,
-		color:     barColor,
-		unit:      unit,
-		unitScale: unitScale,
+	sb := &ScaleBar{
+		zoomFn:    zoomFn,
+		Color:     barColor,
+		Unit:      unit,
+		UnitScale: unitScale,
 	}
-	sb.label = canvas.NewText("", barColor)
-	sb.label.TextSize = 11
-	sb.label.TextStyle = fyne.TextStyle{Monospace: true}
-	sb.label.Alignment = fyne.TextAlignCenter
+	sb.Label = canvas.NewText("", barColor)
+	sb.Label.TextSize = 11
+	sb.Label.TextStyle = fyne.TextStyle{Monospace: true}
+	sb.Label.Alignment = fyne.TextAlignCenter
 
-	sb.raster = canvas.NewRaster(sb.draw)
-	sb.raster.SetMinSize(fyne.NewSize(180, 16))
+	sb.Raster = canvas.NewRaster(sb.draw)
+	sb.Raster.SetMinSize(fyne.NewSize(180, 16))
 
-	sb.content = container.NewVBox(sb.label, sb.raster)
+	sb.content = container.NewVBox(sb.Label, sb.Raster)
 	sb.ExtendBaseWidget(sb)
 	return sb
 }
 
 // CreateRenderer implements fyne.Widget.
-func (sb *scaleBar) CreateRenderer() fyne.WidgetRenderer {
+func (sb *ScaleBar) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(sb.content)
 }
 
 // MinSize implements fyne.Widget.
-func (sb *scaleBar) MinSize() fyne.Size {
+func (sb *ScaleBar) MinSize() fyne.Size {
 	return fyne.NewSize(180, 30)
 }
 
-func (sb *scaleBar) draw(w, h int) image.Image {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	if sb.normScale == 0 || w < 10 || h < 4 {
+func (sb *ScaleBar) draw(w, h int) image.Image {
+	if sb.framebuffer == nil || sb.framebuffer.Rect.Dx() != w || sb.framebuffer.Rect.Dy() != h {
+		sb.framebuffer = image.NewRGBA(image.Rect(0, 0, w, h))
+	}
+	img := sb.framebuffer
+	clear(img.Pix)
+	if sb.NormScale == 0 || w < 10 || h < 4 {
 		return img
 	}
 
-	sb.canvas3d.mu.Lock()
-	zoom := sb.canvas3d.zoom
-	sb.canvas3d.mu.Unlock()
+	zoom := sb.zoomFn()
 
 	// Compute pixels per display unit.
 	// From projectChunk: screenX = (rx / (4.0 - rz)) * zoom + centerX
 	// At center depth (rz=0): 1 normalized unit = zoom/4 pixels.
 	// 1 original unit = normScale normalized units, so 1 original unit = (zoom/4)*normScale pixels.
 	// With unitScale: 1 display unit = 1/unitScale original units = (zoom/4)*normScale/unitScale pixels.
-	pixelsPerDisplayUnit := (zoom / 4.0) * sb.normScale / sb.unitScale
+	pixelsPerDisplayUnit := (zoom / 4.0) * sb.NormScale / sb.UnitScale
 	if pixelsPerDisplayUnit < 1e-9 {
 		return img
 	}
@@ -92,13 +97,13 @@ func (sb *scaleBar) draw(w, h int) image.Image {
 	}
 
 	// Update the label text.
-	labelText := formatScaleLabel(barLength, sb.unit)
-	sb.label.Text = labelText
-	sb.label.Color = sb.color
-	sb.label.Refresh()
+	labelText := formatScaleLabel(barLength, sb.Unit)
+	sb.Label.Text = labelText
+	sb.Label.Color = sb.Color
+	sb.Label.Refresh()
 
 	// Draw the ruler centered in the raster.
-	barColor := sb.color
+	barColor := sb.Color
 	cx := float64(w) / 2.0
 	startX := cx - barPixels/2.0
 	endX := cx + barPixels/2.0

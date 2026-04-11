@@ -95,6 +95,17 @@ func (pc *PointCloud) Normalize() {
 	pc.ComputeBounds()
 }
 
+// maxFieldIndex returns the maximum of the given field indices.
+func maxFieldIndex(indices ...int) int {
+	m := indices[0]
+	for _, idx := range indices[1:] {
+		if idx > m {
+			m = idx
+		}
+	}
+	return m
+}
+
 // SupportedExtensions returns all file extensions the readers handle.
 func SupportedExtensions() []string {
 	return []string{".xyz", ".ply", ".pts", ".pcd"}

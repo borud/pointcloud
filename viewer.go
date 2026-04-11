@@ -12,6 +12,8 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/borud/pointcloud/internal/ui"
 )
 
 // HomeOrientation is the default home view: side-on, slightly elevated.
@@ -41,11 +43,11 @@ type Viewer struct {
 
 	canvas    *canvas3d
 	cube      *orientationCube
-	home      *iconButton
-	zoomFit   *iconButton
+	home      *ui.IconButton
+	zoomFit   *ui.IconButton
 	infoLabel *canvas.Text
 	fpsLabel  *canvas.Text
-	scaleBar  *scaleBar
+	scaleBar  *ui.ScaleBar
 	content   *fyne.Container
 
 	// FPS tracking state.
@@ -71,7 +73,7 @@ func New(opts ...Option) *Viewer {
 	showInfo := boolOr(cfg.showInfoLabel, true)
 
 	if showHome {
-		v.home = newIconButton(28, 28, drawHomeIcon, func() {
+		v.home = ui.NewIconButton(28, 28, ui.DrawHomeIcon, func() {
 			v.canvas.homeView()
 			if v.cube != nil {
 				v.cube.raster.Refresh()
@@ -80,7 +82,7 @@ func New(opts ...Option) *Viewer {
 	}
 
 	if showZoomFit {
-		v.zoomFit = newIconButton(28, 28, drawZoomFitIcon, func() {
+		v.zoomFit = ui.NewIconButton(28, 28, ui.DrawZoomFitIcon, func() {
 			v.canvas.zoomToExtents()
 		})
 	}
@@ -126,7 +128,11 @@ func New(opts ...Option) *Viewer {
 		sbColor := colorOr(cfg.scaleBarColor, color.RGBA{200, 200, 200, 255})
 		sbUnit := stringOr(cfg.scaleUnit, "")
 		sbUnitScale := float64Or(cfg.scaleUnitScale, 1.0)
-		v.scaleBar = newScaleBar(v.canvas, sbColor, sbUnit, sbUnitScale)
+		v.scaleBar = ui.NewScaleBar(func() float64 {
+			v.canvas.mu.Lock()
+			defer v.canvas.mu.Unlock()
+			return v.canvas.zoom
+		}, sbColor, sbUnit, sbUnitScale)
 	}
 
 	if boolOr(cfg.showFPS, false) {
@@ -156,7 +162,7 @@ func New(opts ...Option) *Viewer {
 
 	v.canvas.onZoomChanged = func() {
 		if v.scaleBar != nil {
-			fyne.Do(func() { v.scaleBar.raster.Refresh() })
+			fyne.Do(func() { v.scaleBar.Raster.Refresh() })
 		}
 	}
 
@@ -347,16 +353,16 @@ func (v *Viewer) SetInfoLabelStyle(s fyne.TextStyle) {
 // This is typically the NormScale value from a PointCloud after Normalize().
 func (v *Viewer) SetScale(normScale float64) {
 	if v.scaleBar != nil {
-		v.scaleBar.normScale = normScale
-		fyne.Do(func() { v.scaleBar.raster.Refresh() })
+		v.scaleBar.NormScale = normScale
+		fyne.Do(func() { v.scaleBar.Raster.Refresh() })
 	}
 }
 
 // SetScaleUnit sets the unit label for the scale bar (e.g. "m").
 func (v *Viewer) SetScaleUnit(unit string) {
 	if v.scaleBar != nil {
-		v.scaleBar.unit = unit
-		fyne.Do(func() { v.scaleBar.raster.Refresh() })
+		v.scaleBar.Unit = unit
+		fyne.Do(func() { v.scaleBar.Raster.Refresh() })
 	}
 }
 
@@ -366,19 +372,19 @@ func (v *Viewer) SetScaleUnitScale(multiplier float64) {
 		if multiplier <= 0 {
 			multiplier = 1.0
 		}
-		v.scaleBar.unitScale = multiplier
-		fyne.Do(func() { v.scaleBar.raster.Refresh() })
+		v.scaleBar.UnitScale = multiplier
+		fyne.Do(func() { v.scaleBar.Raster.Refresh() })
 	}
 }
 
 // SetScaleBarColor sets the scale bar color at runtime.
 func (v *Viewer) SetScaleBarColor(c color.RGBA) {
 	if v.scaleBar != nil {
-		v.scaleBar.color = c
-		v.scaleBar.label.Color = c
+		v.scaleBar.Color = c
+		v.scaleBar.Label.Color = c
 		fyne.Do(func() {
-			v.scaleBar.label.Refresh()
-			v.scaleBar.raster.Refresh()
+			v.scaleBar.Label.Refresh()
+			v.scaleBar.Raster.Refresh()
 		})
 	}
 }
@@ -487,6 +493,9 @@ func (v *Viewer) SetFPSSize(size float32) {
 // frame render with the time the draw call took. Useful for benchmarking.
 // If the FPS display is enabled, both the FPS counter and this callback
 // will be called.
+//
+// Note: calling this multiple times creates a chain of closures; each new
+// callback wraps the previous one. This is fine for single-call usage.
 func (v *Viewer) SetOnFrameDrawn(fn func(time.Duration)) {
 	if v.fpsLabel == nil {
 		v.canvas.onFrameDrawn = fn

@@ -274,8 +274,8 @@ func generateCode(s codeGenState) string {
 	if s.upAxis == pointcloud.ZUp {
 		b.WriteString("v.SetUpAxis(pointcloud.ZUp)\n")
 	}
-	if s.lodEnabled {
-		b.WriteString("v.SetLODEnabled(true)\n")
+	if !s.lodEnabled {
+		b.WriteString("v.SetLODEnabled(false)\n")
 	}
 
 	return b.String()
@@ -609,10 +609,9 @@ func main() {
 
 	// Rendering settings.
 	zupCheck := widget.NewCheck("Z-up", func(on bool) {
+		currentUpAxis = pointcloud.YUp
 		if on {
 			currentUpAxis = pointcloud.ZUp
-		} else {
-			currentUpAxis = pointcloud.YUp
 		}
 		v.SetUpAxis(currentUpAxis)
 	})

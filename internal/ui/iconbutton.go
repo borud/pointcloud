@@ -1,4 +1,4 @@
-package pointcloud
+package ui
 
 import (
 	"image"
@@ -11,24 +11,26 @@ import (
 	"github.com/borud/pointcloud/internal/raster"
 )
 
-// iconButton is a small, transparent, tappable widget that renders custom
-// content via a draw function. Used for the home button.
-type iconButton struct {
+// IconButton is a small, transparent, tappable widget that renders custom
+// content via a draw function. Used for the home and zoom-fit buttons.
+type IconButton struct {
 	widget.BaseWidget
-	raster   *canvas.Raster
+	Raster   *canvas.Raster
 	onTap    func()
 	w, h     float32
 	drawFunc func(*image.RGBA, int, int)
 }
 
-func newIconButton(w, h float32, drawFunc func(*image.RGBA, int, int), onTap func()) *iconButton {
-	ib := &iconButton{
+// NewIconButton creates a new icon button with the given size, draw function,
+// and tap callback.
+func NewIconButton(w, h float32, drawFunc func(*image.RGBA, int, int), onTap func()) *IconButton {
+	ib := &IconButton{
 		onTap:    onTap,
 		w:        w,
 		h:        h,
 		drawFunc: drawFunc,
 	}
-	ib.raster = canvas.NewRaster(func(pw, ph int) image.Image {
+	ib.Raster = canvas.NewRaster(func(pw, ph int) image.Image {
 		img := image.NewRGBA(image.Rect(0, 0, pw, ph))
 		ib.drawFunc(img, pw, ph)
 		return img
@@ -37,21 +39,25 @@ func newIconButton(w, h float32, drawFunc func(*image.RGBA, int, int), onTap fun
 	return ib
 }
 
-func (ib *iconButton) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(ib.raster)
+// CreateRenderer implements fyne.Widget.
+func (ib *IconButton) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(ib.Raster)
 }
 
-func (ib *iconButton) MinSize() fyne.Size {
+// MinSize implements fyne.Widget.
+func (ib *IconButton) MinSize() fyne.Size {
 	return fyne.NewSize(ib.w, ib.h)
 }
 
-func (ib *iconButton) Tapped(_ *fyne.PointEvent) {
+// Tapped implements fyne.Tappable.
+func (ib *IconButton) Tapped(_ *fyne.PointEvent) {
 	if ib.onTap != nil {
 		ib.onTap()
 	}
 }
 
-func drawZoomFitIcon(img *image.RGBA, w, h int) {
+// DrawZoomFitIcon draws corner brackets with inward arrows suggesting "fit to view".
+func DrawZoomFitIcon(img *image.RGBA, w, h int) {
 	outline := color.RGBA{200, 200, 200, 200}
 	cx, cy := float64(w)/2, float64(h)/2
 	s := float64(w) * 0.30
@@ -79,7 +85,8 @@ func drawZoomFitIcon(img *image.RGBA, w, h int) {
 	raster.LineAA(img, cx, cy-aOff, cx, cy+aOff, arrowColor)
 }
 
-func drawHomeIcon(img *image.RGBA, w, h int) {
+// DrawHomeIcon draws a simple house icon.
+func DrawHomeIcon(img *image.RGBA, w, h int) {
 	fill := color.RGBA{160, 160, 160, 160}
 	outline := color.RGBA{200, 200, 200, 200}
 	cx, cy := float64(w)/2, float64(h)/2

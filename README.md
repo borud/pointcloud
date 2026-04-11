@@ -1,5 +1,7 @@
 # Point Cloud Viewer
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/borud/pointcloud.svg)](https://pkg.go.dev/github.com/borud/pointcloud)
+
 A simple point cloud viewer built with [Fyne](https://fyne.io/) and OpenGL. Reads PLY, PCD, PTS, and XYZ files and renders them as interactive 3D point clouds with mouse-controlled rotation and zoom.
 
 ![Screenshot](screenshot.png)
@@ -147,6 +149,37 @@ v.ZoomToExtents()
 f, _ := os.Create("output.ply")
 defer f.Close()
 pointcloud.WritePLY(f, pc)
+```
+
+## Benchmarking
+
+Install [benchstat](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat) for comparing results:
+
+```sh
+go install golang.org/x/perf/cmd/benchstat@latest
+```
+
+Run benchmarks on your current (known-good) code and save as baseline:
+
+```sh
+make bench
+mv bench/new.txt bench/old.txt
+```
+
+After making changes, run benchmarks again and compare:
+
+```sh
+make bench
+make benchstat
+```
+
+`benchstat` will show per-benchmark deltas with p-values, making it easy to spot regressions:
+
+```
+               │  old.txt   │              new.txt               │
+               │   sec/op   │   sec/op     vs base               │
+Draw_1M-10       45.2ms ± 1%   44.8ms ± 2%  ~ (p=0.394 n=6)
+Projection_1M    12.3ms ± 0%   15.1ms ± 1%  +22.76% (p=0.002 n=6)
 ```
 
 ## Sample data
