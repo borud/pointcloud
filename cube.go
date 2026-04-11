@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"slices"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -89,11 +90,12 @@ var cubeCorners = func() [8]snapTarget {
 // orientationCube draws a 3D cube gizmo and handles clicks to snap orientation.
 type orientationCube struct {
 	widget.BaseWidget
-	raster *canvas.Raster
-	canvas *canvas3d
-	size   float64
-	onSnap func()
-	colors CubeColors
+	raster      *canvas.Raster
+	canvas      *canvas3d
+	size        float64
+	onSnap      func()
+	colors      CubeColors
+	framebuffer *image.RGBA
 }
 
 func newOrientationCube(c *canvas3d, cc CubeColors, onSnap func()) *orientationCube {
@@ -125,7 +127,7 @@ func rotatePoint(p [3]float64, m [9]float64) (float64, float64, float64) {
 	return rx, ry, rz
 }
 
-func projectPoint(px, py, _ float64, cx, cy, scale float64) raster.Vec2 {
+func projectPoint(px, py, cx, cy, scale float64) raster.Vec2 {
 	return raster.Vec2{
 		X: px*scale + cx,
 		Y: py*scale + cy,
@@ -133,8 +135,14 @@ func projectPoint(px, py, _ float64, cx, cy, scale float64) raster.Vec2 {
 }
 
 func (oc *orientationCube) draw(w, h int) image.Image {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	if oc.framebuffer == nil || oc.framebuffer.Rect.Dx() != w || oc.framebuffer.Rect.Dy() != h {
+		oc.framebuffer = image.NewRGBA(image.Rect(0, 0, w, h))
+	}
+	img := oc.framebuffer
 	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 0
+		img.Pix[i+1] = 0
+		img.Pix[i+2] = 0
 		img.Pix[i+3] = 0
 	}
 
@@ -180,20 +188,22 @@ func (oc *orientationCube) draw(w, h int) image.Image {
 		visibleFaces = append(visibleFaces, faceZ{i, avgZ / 4})
 	}
 
-	for i := 0; i < len(visibleFaces); i++ {
-		for j := i + 1; j < len(visibleFaces); j++ {
-			if visibleFaces[j].z < visibleFaces[i].z {
-				visibleFaces[i], visibleFaces[j] = visibleFaces[j], visibleFaces[i]
-			}
+	slices.SortFunc(visibleFaces, func(a, b faceZ) int {
+		if a.z < b.z {
+			return -1
 		}
-	}
+		if a.z > b.z {
+			return 1
+		}
+		return 0
+	})
 
 	for _, fz := range visibleFaces {
 		f := cubeFaces[fz.idx]
 		var projected [4]raster.Vec2
 		for i, vi := range f.verts {
-			rx, ry, rz := rotatePoint(cubeVerts[vi], m)
-			projected[i] = projectPoint(rx, ry, rz, cx, cy, scale)
+			rx, ry, _ := rotatePoint(cubeVerts[vi], m)
+			projected[i] = projectPoint(rx, ry, cx, cy, scale)
 		}
 		raster.FillQuad(img, projected, oc.colors.Faces[fz.idx])
 		raster.QuadOutline(img, projected, oc.colors.EdgeColor)
@@ -205,12 +215,12 @@ func (oc *orientationCube) draw(w, h int) image.Image {
 
 	axisLen := 1.4
 	axes := [3][3]float64{{axisLen, 0, 0}, {0, axisLen, 0}, {0, 0, axisLen}}
-	ox, oy, oz := rotatePoint([3]float64{0, 0, 0}, m)
-	origin := projectPoint(ox, oy, oz, cx, cy, scale)
+	ox, oy, _ := rotatePoint([3]float64{0, 0, 0}, m)
+	origin := projectPoint(ox, oy, cx, cy, scale)
 
 	for i, a := range axes {
-		rx, ry, rz := rotatePoint(a, m)
-		end := projectPoint(rx, ry, rz, cx, cy, scale)
+		rx, ry, _ := rotatePoint(a, m)
+		end := projectPoint(rx, ry, cx, cy, scale)
 		raster.Line(img, int(origin.X), int(origin.Y), int(end.X), int(end.Y), oc.colors.AxisColors[i])
 		raster.Label(img, int(end.X), int(end.Y)-6, axisLabels[i], oc.colors.AxisColors[i])
 	}
@@ -242,8 +252,8 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 		var projected [4]raster.Vec2
 		fcx, fcy := 0.0, 0.0
 		for j, vi := range f.verts {
-			rx, ry, rz := rotatePoint(cubeVerts[vi], m)
-			projected[j] = projectPoint(rx, ry, rz, cx, cy, scale)
+			rx, ry, _ := rotatePoint(cubeVerts[vi], m)
+			projected[j] = projectPoint(rx, ry, cx, cy, scale)
 			fcx += projected[j].X
 			fcy += projected[j].Y
 		}
@@ -268,7 +278,7 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 		if rz >= 0 {
 			continue
 		}
-		p := projectPoint(rx, ry, rz, cx, cy, scale)
+		p := projectPoint(rx, ry, cx, cy, scale)
 		d := math.Hypot(clickX-p.X, clickY-p.Y)
 		if d < hitRadius && d < bestPointDist {
 			bestPointDist = d
@@ -281,7 +291,7 @@ func (oc *orientationCube) Tapped(ev *fyne.PointEvent) {
 		if rz >= 0 {
 			continue
 		}
-		p := projectPoint(rx, ry, rz, cx, cy, scale)
+		p := projectPoint(rx, ry, cx, cy, scale)
 		d := math.Hypot(clickX-p.X, clickY-p.Y)
 		if d < hitRadius && d < bestPointDist {
 			bestPointDist = d

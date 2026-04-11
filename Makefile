@@ -1,31 +1,47 @@
-BIN := pointcloud
-PKG := ./...
-CMD := ./cmd/pointcloud-viewer
+BINARIES := $(notdir $(shell find cmd -mindepth 1 -maxdepth 1 -type d))
 
-.PHONY: all build run test vet lint revive staticcheck fmt tidy clean
+.PHONY: $(BINARIES)
+.PHONY: all 
+.PHONY: build 
+.PHONY: run 
+.PHONY: test 
+.PHONY: bench 
+.PHONY: benchstat 
+.PHONY: vet 
+.PHONY: lint 
+.PHONY: revive 
+.PHONY: staticcheck 
+.PHONY: fmt 
+.PHONY: tidy 
+.PHONY: clean
 
-all: lint build
+all: lint vet staticcheck test build
 
-build:
+$(BINARIES):
 	@echo "*** $@"
-	@fyne build -o bin/$(BIN) $(CMD)
-	@go build -o bin/pcbench ./cmd/pcbench
+	@cd cmd/$@ && CGO_ENABLED=0 go build $(LDFLAGS) -trimpath -o ../../bin/$@
 
 run:
 	@echo "*** $@"
-	@go run $(CMD)
+	@go run cmd/
 
 test:
 	@echo "*** $@"
-	@go test $(PKG)
+	@go test ./...
+
+bench:
+	@echo "*** $@"
+	@go test -bench=. -benchmem -count=6 ./... | tee bench/new.txt
+
+benchstat:
+	@echo "*** $@"
+	@benchstat bench/old.txt bench/new.txt
 
 vet:
 	@echo "*** $@"
-	@go vet $(PKG)
+	@go vet ./...
 
-lint: vet revive staticcheck
-
-revive:
+lint:
 	@echo "*** $@"
 	@revive ./...
 

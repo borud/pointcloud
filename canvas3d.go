@@ -411,34 +411,28 @@ func projectChunk(
 		off := iy*stride + ix*4
 		packed := rgba[i]
 
-		if packed&hasColorBit != 0 {
-			// Depth-based shading: clamp shade to [0.3, 1.0].
-			shade := 1.0 - rz*0.15
-			if shade < 0.3 {
-				shade = 0.3
-			} else if shade > 1.0 {
-				shade = 1.0
-			}
-			r := uint8(float32(packed>>16&0xFF) * shade)
-			g := uint8(float32(packed>>8&0xFF) * shade)
-			b := uint8(float32(packed&0xFF) * shade)
-
-			// Single 32-bit store (little-endian: R at low byte).
-			*(*uint32)(unsafe.Pointer(&pix[off])) =
-				uint32(r) | uint32(g)<<8 | uint32(b)<<16 | 0xFF000000
-		} else {
-			shade := 1.0 - rz*0.15
-			if shade < 0.3 {
-				shade = 0.3
-			} else if shade > 1.0 {
-				shade = 1.0
-			}
-			r := uint8(defR * shade)
-			g := uint8(defG * shade)
-			b := uint8(defB * shade)
-			*(*uint32)(unsafe.Pointer(&pix[off])) =
-				uint32(r) | uint32(g)<<8 | uint32(b)<<16 | 0xFF000000
+		// Depth-based shading: clamp shade to [0.3, 1.0].
+		shade := 1.0 - rz*0.15
+		if shade < 0.3 {
+			shade = 0.3
+		} else if shade > 1.0 {
+			shade = 1.0
 		}
+
+		var r, g, b uint8
+		if packed&hasColorBit != 0 {
+			r = uint8(float32(packed>>16&0xFF) * shade)
+			g = uint8(float32(packed>>8&0xFF) * shade)
+			b = uint8(float32(packed&0xFF) * shade)
+		} else {
+			r = uint8(defR * shade)
+			g = uint8(defG * shade)
+			b = uint8(defB * shade)
+		}
+
+		// Single 32-bit store (little-endian: R at low byte).
+		*(*uint32)(unsafe.Pointer(&pix[off])) =
+			uint32(r) | uint32(g)<<8 | uint32(b)<<16 | 0xFF000000
 	}
 }
 

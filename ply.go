@@ -123,19 +123,9 @@ func ReadPLY(r io.Reader) (*PointCloud, error) {
 }
 
 func readPLYASCII(br *bufio.Reader, pc *PointCloud, count int, _ []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool) error {
-	maxIdx := xi
-	if yi > maxIdx {
-		maxIdx = yi
-	}
-	if zi > maxIdx {
-		maxIdx = zi
-	}
+	maxIdx := maxFieldIndex(xi, yi, zi)
 	if hasColor {
-		for _, idx := range []int{ri, gi, bi} {
-			if idx > maxIdx {
-				maxIdx = idx
-			}
-		}
+		maxIdx = maxFieldIndex(maxIdx, ri, gi, bi)
 	}
 
 	for i := 0; i < count; i++ {
