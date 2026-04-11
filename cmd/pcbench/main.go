@@ -17,8 +17,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
-	"github.com/borud/pointcloud/pkg/pcviewer"
-	"github.com/borud/pointcloud/pkg/pointcloud"
+	"github.com/borud/pointcloud"
 )
 
 func main() {
@@ -47,18 +46,21 @@ func main() {
 	w := a.NewWindow("pcbench")
 	w.Resize(fyne.NewSize(1024, 768))
 
-	v := pcviewer.New()
-	v.SetUpAxis(pcviewer.ZUp)
+	v := pointcloud.New()
+	v.SetUpAxis(pointcloud.ZUp)
 	v.SetLODEnabled(*lod)
 	w.SetContent(v)
 
 	// Collect frame render times from the draw callback.
+	// pending holds frames not yet printed; allFrames accumulates for the summary.
 	var mu sync.Mutex
-	var frameTimes []time.Duration
+	var pending []time.Duration
+	var allFrames []time.Duration
 
 	v.SetOnFrameDrawn(func(d time.Duration) {
 		mu.Lock()
-		frameTimes = append(frameTimes, d)
+		pending = append(pending, d)
+		allFrames = append(allFrames, d)
 		mu.Unlock()
 	})
 
@@ -67,7 +69,7 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 		v.SetPoints(pts)
 
-		runBenchmark(v, &mu, &frameTimes, *duration)
+		runBenchmark(v, &mu, &pending, *duration)
 		fyne.Do(func() {
 			a.Quit()
 		})
@@ -77,17 +79,12 @@ func main() {
 
 	// Print final stats after window closes.
 	mu.Lock()
-	printStats(frameTimes)
+	printStats(allFrames)
 	mu.Unlock()
 }
 
-func runBenchmark(v *pcviewer.Viewer, mu *sync.Mutex, allFrameTimes *[]time.Duration, dur time.Duration) {
-	// Small rotation per frame to simulate interaction.
-	dq := pcviewer.QuatFromAxisAngle(0.2, 0.7, 0.1, 0.02)
-
-	// Interval buffer; drained each second. All times are also
-	// appended to allFrameTimes for the final summary.
-	var intervalBuf []time.Duration
+func runBenchmark(v *pointcloud.Viewer, mu *sync.Mutex, pending *[]time.Duration, dur time.Duration) {
+	dq := pointcloud.QuatFromAxisAngle(0.2, 0.7, 0.1, 0.02)
 
 	deadline := time.Now().Add(dur)
 	lastPrint := time.Now()
@@ -96,37 +93,29 @@ func runBenchmark(v *pcviewer.Viewer, mu *sync.Mutex, allFrameTimes *[]time.Dura
 		q := v.Orientation()
 		v.SetOrientation(dq.Mul(q).Normalize())
 
-		// Print rolling stats once per second.
 		elapsed := time.Since(lastPrint)
 		if elapsed >= time.Second {
 			mu.Lock()
-			intervalBuf = append(intervalBuf, *allFrameTimes...)
-			*allFrameTimes = (*allFrameTimes)[:0]
+			interval := make([]time.Duration, len(*pending))
+			copy(interval, *pending)
+			*pending = (*pending)[:0]
 			mu.Unlock()
 
-			n := len(intervalBuf)
+			n := len(interval)
 			if n > 0 {
 				var sum time.Duration
-				for _, t := range intervalBuf {
+				for _, t := range interval {
 					sum += t
 				}
 				avg := sum / time.Duration(n)
 				fps := float64(n) / elapsed.Seconds()
 				fmt.Printf("frames=%d  avg_render=%v  fps=%.1f\n", n, avg, fps)
 			}
-
-			// Keep for final summary, then reset interval buffer.
-			mu.Lock()
-			*allFrameTimes = append(*allFrameTimes, intervalBuf...)
-			mu.Unlock()
-			intervalBuf = intervalBuf[:0]
 			lastPrint = time.Now()
 		}
 
-		// Yield to let Fyne render.
 		time.Sleep(1 * time.Millisecond)
 	}
-
 }
 
 func printStats(times []time.Duration) {

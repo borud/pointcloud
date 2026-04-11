@@ -1,4 +1,4 @@
-package pcviewer
+package pointcloud
 
 import (
 	"image/color"

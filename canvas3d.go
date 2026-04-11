@@ -1,4 +1,4 @@
-package pcviewer
+package pointcloud
 
 import (
 	"image"
@@ -13,8 +13,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
-
-	"github.com/borud/pointcloud/pkg/pointcloud"
 )
 
 // Pixel packing note: image.RGBA stores bytes as R,G,B,A in memory order.
@@ -46,7 +44,7 @@ type canvas3d struct {
 	maxZoomOutFraction   float64
 
 	// Original points kept for Tapped to return the original Point3D.
-	points []pointcloud.Point3D
+	points []Point3D
 
 	// SoA (Structure-of-Arrays) storage in float32 for the hot rendering
 	// loop. The Z-up swap is applied at conversion time so the inner loop
@@ -82,7 +80,7 @@ type canvas3d struct {
 	onOrientationChanged func()
 	onHomeView           func()
 	onZoomChanged        func()
-	onPointTapped        func(p pointcloud.Point3D, screenX, screenY float64)
+	onPointTapped        func(p Point3D, screenX, screenY float64)
 	onPointCleared       func()
 	onFrameDrawn         func(d time.Duration) // called at end of draw with render time
 }
@@ -118,7 +116,7 @@ func (c *canvas3d) minZoom() float64 {
 	return 2.0 * c.maxZoomOutFraction * maxDim
 }
 
-func (c *canvas3d) setPoints(pts []pointcloud.Point3D) {
+func (c *canvas3d) setPoints(pts []Point3D) {
 	c.mu.Lock()
 	c.points = pts
 	c.convertToSoA()

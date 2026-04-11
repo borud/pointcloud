@@ -18,8 +18,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/borud/pointcloud/pkg/pcviewer"
-	"github.com/borud/pointcloud/pkg/pointcloud"
+	"github.com/borud/pointcloud"
 )
 
 // --- defaults ---
@@ -103,13 +102,14 @@ func main() {
 	pointColor := defaultPointColor
 	infoLabelColor := defaultInfoLabelColor
 	infoLabelStyle := defaultInfoLabelStyle
-	cubeColors := pcviewer.DefaultCubeColors()
+	cubeColors := pointcloud.DefaultCubeColors()
 	showCube := true
 	showHome := true
 	showZoomFit := true
 	showInfo := true
 	showScaleBar := true
 	showFPS := false
+	lodEnabled := false
 	fpsColor := color.RGBA{200, 200, 200, 255}
 	fpsStyle := fyne.TextStyle{Monospace: true}
 	scaleBarColor := color.RGBA{200, 200, 200, 255}
@@ -119,32 +119,33 @@ func main() {
 
 	// Points storage so we can reload after viewer rebuild.
 	var currentPoints []pointcloud.Point3D
-	var currentUpAxis pcviewer.UpAxis
+	var currentUpAxis pointcloud.UpAxis
 	if strings.EqualFold(*axis, "zup") {
-		currentUpAxis = pcviewer.ZUp
+		currentUpAxis = pointcloud.ZUp
 	}
 
 	// Build the viewer with current settings.
-	buildViewer := func() *pcviewer.Viewer {
-		v := pcviewer.New(
-			pcviewer.WithBackgroundColor(bgColor),
-			pcviewer.WithDefaultPointColor(pointColor),
-			pcviewer.WithInfoLabelColor(infoLabelColor),
-			pcviewer.WithInfoLabelStyle(infoLabelStyle),
-			pcviewer.WithCubeColors(cubeColors),
-			pcviewer.WithOrientationCube(showCube),
-			pcviewer.WithHomeButton(showHome),
-			pcviewer.WithZoomFitButton(showZoomFit),
-			pcviewer.WithInfoLabel(showInfo),
-			pcviewer.WithScaleBar(showScaleBar),
-			pcviewer.WithScaleBarColor(scaleBarColor),
-			pcviewer.WithScaleUnit(scaleUnit),
-			pcviewer.WithScaleUnitScale(scaleUnitScale),
-			pcviewer.WithFPS(showFPS),
-			pcviewer.WithFPSColor(fpsColor),
-			pcviewer.WithFPSStyle(fpsStyle),
+	buildViewer := func() *pointcloud.Viewer {
+		v := pointcloud.New(
+			pointcloud.WithBackgroundColor(bgColor),
+			pointcloud.WithDefaultPointColor(pointColor),
+			pointcloud.WithInfoLabelColor(infoLabelColor),
+			pointcloud.WithInfoLabelStyle(infoLabelStyle),
+			pointcloud.WithCubeColors(cubeColors),
+			pointcloud.WithOrientationCube(showCube),
+			pointcloud.WithHomeButton(showHome),
+			pointcloud.WithZoomFitButton(showZoomFit),
+			pointcloud.WithInfoLabel(showInfo),
+			pointcloud.WithScaleBar(showScaleBar),
+			pointcloud.WithScaleBarColor(scaleBarColor),
+			pointcloud.WithScaleUnit(scaleUnit),
+			pointcloud.WithScaleUnitScale(scaleUnitScale),
+			pointcloud.WithFPS(showFPS),
+			pointcloud.WithFPSColor(fpsColor),
+			pointcloud.WithFPSStyle(fpsStyle),
 		)
 		v.SetUpAxis(currentUpAxis)
+		v.SetLODEnabled(lodEnabled)
 		if currentNormScale > 0 {
 			v.SetScale(currentNormScale)
 		}
@@ -181,34 +182,6 @@ func main() {
 	}
 
 	// --- Toolbar ---
-	axisLabel := "Y-up"
-	if currentUpAxis == pcviewer.ZUp {
-		axisLabel = "Z-up"
-	}
-	axisBtn := widget.NewButton(axisLabel, nil)
-	axisBtn.OnTapped = func() {
-		if v.GetUpAxis() == pcviewer.ZUp {
-			currentUpAxis = pcviewer.YUp
-			v.SetUpAxis(pcviewer.YUp)
-			axisBtn.SetText("Y-up")
-		} else {
-			currentUpAxis = pcviewer.ZUp
-			v.SetUpAxis(pcviewer.ZUp)
-			axisBtn.SetText("Z-up")
-		}
-	}
-
-	lodBtn := widget.NewButton("LOD", nil)
-	lodBtn.OnTapped = func() {
-		enabled := !v.LODEnabled()
-		v.SetLODEnabled(enabled)
-		if enabled {
-			lodBtn.SetText("LOD")
-		} else {
-			lodBtn.SetText("lod")
-		}
-	}
-
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.FolderOpenIcon(), func() {
 			dlg := dialog.NewFileOpen(func(rc fyne.URIReadCloser, err error) {
@@ -289,7 +262,7 @@ func main() {
 	})
 	trackSwatch(sbColorRect, func() color.RGBA { return scaleBarColor })
 
-	canvasSection := widget.NewCard("Canvas", "",
+	canvasSection := widget.NewCard("Canvas", "Background, point, and label colors",
 		container.NewVBox(bgRow, ptRow, infoRow, sbColorRow),
 	)
 
@@ -330,7 +303,7 @@ func main() {
 	})
 	fontSelect.SetSelected(nameFromStyle(infoLabelStyle))
 
-	fontSection := widget.NewCard("Info Label", "",
+	fontSection := widget.NewCard("Info Label", "Style of the point info text",
 		container.NewVBox(
 			widget.NewLabel("WithInfoLabelStyle"),
 			fontSelect,
@@ -375,7 +348,7 @@ func main() {
 		cubeColorRows = append(cubeColorRows, row)
 	}
 
-	cubeSection := widget.NewCard("CubeColors", "",
+	cubeSection := widget.NewCard("CubeColors", "Colors for the orientation cube faces, edges, and axes",
 		container.NewVBox(cubeColorRows...),
 	)
 
@@ -391,7 +364,7 @@ func main() {
 		v.SetMaxZoomOutFraction(val)
 	}
 
-	zoomSection := widget.NewCard("Zoom", "",
+	zoomSection := widget.NewCard("Zoom", "How far the user can zoom out",
 		container.NewVBox(zoomOutLabel, zoomOutSlider),
 	)
 
@@ -426,8 +399,34 @@ func main() {
 	})
 	fpsCheck.SetChecked(showFPS)
 
-	visSection := widget.NewCard("Visibility", "",
+	visSection := widget.NewCard("Visibility", "Show or hide overlay elements",
 		container.NewVBox(cubeCheck, homeCheck, zoomFitCheck, infoCheck, fpsCheck),
+	)
+
+	// Rendering settings.
+	zupCheck := widget.NewCheck("Z-up", func(on bool) {
+		if on {
+			currentUpAxis = pointcloud.ZUp
+		} else {
+			currentUpAxis = pointcloud.YUp
+		}
+		v.SetUpAxis(currentUpAxis)
+	})
+	zupCheck.SetChecked(currentUpAxis == pointcloud.ZUp)
+
+	lodCheck := widget.NewCheck("LOD decimation", func(on bool) {
+		lodEnabled = on
+		v.SetLODEnabled(on)
+	})
+	lodCheck.SetChecked(lodEnabled)
+
+	renderSection := widget.NewCard("Rendering", "Controls that affect how the point cloud is rendered",
+		container.NewVBox(
+			zupCheck,
+			widget.NewLabel("  Treat Z as up axis (typical for LiDAR/surveying data)"),
+			lodCheck,
+			widget.NewLabel("  Reduce point count during interaction for faster frame rates"),
+		),
 	)
 
 	// FPS display settings.
@@ -443,7 +442,7 @@ func main() {
 	})
 	fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
 
-	fpsSection := widget.NewCard("FPS Display", "",
+	fpsSection := widget.NewCard("FPS Display", "Color and style of the FPS counter",
 		container.NewVBox(
 			fpsColorRow,
 			widget.NewLabel("WithFPSStyle"),
@@ -477,7 +476,7 @@ func main() {
 	})
 	scaleBarCheck.SetChecked(showScaleBar)
 
-	scaleSection := widget.NewCard("Scale Bar", "",
+	scaleSection := widget.NewCard("Scale Bar", "Unit and multiplier for the scale indicator",
 		container.NewVBox(
 			scaleBarCheck,
 			widget.NewLabel("WithScaleUnit"),
@@ -493,13 +492,15 @@ func main() {
 		pointColor = defaultPointColor
 		infoLabelColor = defaultInfoLabelColor
 		infoLabelStyle = defaultInfoLabelStyle
-		cubeColors = pcviewer.DefaultCubeColors()
+		cubeColors = pointcloud.DefaultCubeColors()
 		showCube = true
 		showHome = true
 		showZoomFit = true
 		showInfo = true
 		showScaleBar = true
 		showFPS = false
+		lodEnabled = false
+		currentUpAxis = pointcloud.ZUp
 		fpsColor = color.RGBA{200, 200, 200, 255}
 		fpsStyle = fyne.TextStyle{Monospace: true}
 		scaleBarColor = color.RGBA{200, 200, 200, 255}
@@ -531,11 +532,13 @@ func main() {
 		scaleBarCheck.SetChecked(true)
 		fpsCheck.SetChecked(false)
 		fpsFontSelect.SetSelected(nameFromStyle(fpsStyle))
+		zupCheck.SetChecked(true)
+		lodCheck.SetChecked(false)
 
 		rebuildViewer()
 	})
 
-	settingsContent := container.NewVBox(canvasSection, fontSection, zoomSection, scaleSection, cubeSection, visSection, fpsSection, resetBtn)
+	settingsContent := container.NewVBox(renderSection, canvasSection, fontSection, zoomSection, scaleSection, cubeSection, visSection, fpsSection, resetBtn)
 	settingsScroll := container.NewVScroll(settingsContent)
 	settingsScroll.SetMinSize(fyne.NewSize(240, 0))
 
@@ -545,7 +548,7 @@ func main() {
 	)
 
 	top := container.NewBorder(nil, nil, nil,
-		container.NewHBox(axisBtn, lodBtn, statusLabel),
+		statusLabel,
 		toolbar,
 	)
 

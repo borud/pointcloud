@@ -1,17 +1,4 @@
-// Package pcviewer provides a reusable Fyne widget for interactive 3D point
-// cloud visualization.
-//
-// The [Viewer] widget combines a 3D rendering canvas with an orientation cube,
-// home and zoom-to-fit buttons, and a point info label. It supports arcball
-// rotation (drag), panning (Shift+drag), and scroll-wheel zoom.
-//
-// Basic usage:
-//
-//	v := pcviewer.New()
-//	v.SetUpAxis(pcviewer.ZUp)
-//	// ... add v to your Fyne layout ...
-//	v.SetPoints(points)
-package pcviewer
+package pointcloud
 
 import (
 	"fmt"
@@ -25,8 +12,6 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-
-	"github.com/borud/pointcloud/pkg/pointcloud"
 )
 
 // HomeOrientation is the default home view: side-on, slightly elevated.
@@ -125,16 +110,13 @@ func New(opts ...Option) *Viewer {
 	if showInfo {
 		infoColor := colorOr(cfg.infoLabelColor, color.RGBA{})
 
-		v.infoLabel = canvas.NewText("", color.RGBA{0, 0, 0, 0})
+		v.infoLabel = canvas.NewText("", theme.DefaultTheme().Color(theme.ColorNameForeground, theme.VariantDark))
 		if cfg.infoLabelColor != nil {
 			v.infoLabel.Color = infoColor
-		} else {
-			v.infoLabel.Color = theme.DefaultTheme().Color(theme.ColorNameForeground, theme.VariantDark)
 		}
+		v.infoLabel.TextStyle = fyne.TextStyle{Monospace: true}
 		if cfg.infoLabelStyle != nil {
 			v.infoLabel.TextStyle = *cfg.infoLabelStyle
-		} else {
-			v.infoLabel.TextStyle = fyne.TextStyle{Monospace: true}
 		}
 		v.infoLabel.TextSize = float32Or(cfg.infoLabelSize, 12)
 	}
@@ -150,10 +132,9 @@ func New(opts ...Option) *Viewer {
 	if boolOr(cfg.showFPS, false) {
 		fpsColor := colorOr(cfg.fpsColor, color.RGBA{200, 200, 200, 255})
 		v.fpsLabel = canvas.NewText("", fpsColor)
+		v.fpsLabel.TextStyle = fyne.TextStyle{Monospace: true}
 		if cfg.fpsStyle != nil {
 			v.fpsLabel.TextStyle = *cfg.fpsStyle
-		} else {
-			v.fpsLabel.TextStyle = fyne.TextStyle{Monospace: true}
 		}
 		v.fpsLabel.TextSize = float32Or(cfg.fpsSize, 14)
 		v.fpsLastUpdate = time.Now()
@@ -179,7 +160,7 @@ func New(opts ...Option) *Viewer {
 		}
 	}
 
-	v.canvas.onPointTapped = func(p pointcloud.Point3D, _, _ float64) {
+	v.canvas.onPointTapped = func(p Point3D, _, _ float64) {
 		if v.infoLabel == nil {
 			return
 		}
@@ -200,8 +181,7 @@ func New(opts ...Option) *Viewer {
 	}
 
 	// Build the overlay controls.
-	var btnItems []fyne.CanvasObject
-	btnItems = append(btnItems, layout.NewSpacer())
+	btnItems := []fyne.CanvasObject{layout.NewSpacer()}
 	if v.zoomFit != nil {
 		btnItems = append(btnItems, container.New(layout.NewGridWrapLayout(fyne.NewSize(28, 28)), v.zoomFit))
 	}
@@ -210,14 +190,13 @@ func New(opts ...Option) *Viewer {
 	}
 	btnRow := container.NewHBox(btnItems...)
 
-	var controlItems []fyne.CanvasObject
-	controlItems = append(controlItems, btnRow)
+	controlItems := []fyne.CanvasObject{btnRow}
 	if v.cube != nil {
 		controlItems = append(controlItems, container.New(layout.NewGridWrapLayout(fyne.NewSize(105, 105)), v.cube))
 	}
 	controls := container.NewVBox(controlItems...)
 
-	var bottomItems []fyne.CanvasObject
+	bottomItems := []fyne.CanvasObject{}
 	if v.infoLabel != nil {
 		bottomItems = append(bottomItems, v.infoLabel)
 	}
@@ -225,25 +204,25 @@ func New(opts ...Option) *Viewer {
 	if v.scaleBar != nil {
 		bottomItems = append(bottomItems, v.scaleBar)
 	}
+
 	var bottom fyne.CanvasObject
 	if len(bottomItems) > 1 { // more than just a spacer
 		bottom = container.NewHBox(bottomItems...)
 	}
 
-	var topItems []fyne.CanvasObject
+	topRight := container.NewHBox(layout.NewSpacer(), controls)
+
+	var topLeft fyne.CanvasObject
 	if v.fpsLabel != nil {
-		topItems = append(topItems, v.fpsLabel)
+		topLeft = container.NewVBox(v.fpsLabel)
 	}
-	topItems = append(topItems, layout.NewSpacer())
-	topItems = append(topItems, controls)
-	top := container.NewHBox(topItems...)
 
 	overlay := container.New(
 		layout.NewCustomPaddedLayout(15, 15, 15, 15),
 		container.NewBorder(
-			top,
+			topRight,
 			bottom,
-			nil, nil,
+			topLeft, nil,
 		),
 	)
 
@@ -258,14 +237,14 @@ func (v *Viewer) CreateRenderer() fyne.WidgetRenderer {
 }
 
 // SetPoints replaces the displayed point cloud and resets the view to fit
-// all points. The points should be normalized (see [pointcloud.PointCloud.Normalize]).
-func (v *Viewer) SetPoints(pts []pointcloud.Point3D) {
+// all points. The points should be normalized (see [PointCloud.Normalize]).
+func (v *Viewer) SetPoints(pts []Point3D) {
 	v.canvas.setPoints(pts)
 }
 
 // SetPointsPreserveView replaces the displayed point cloud without resetting
 // the orientation, zoom, or pan.
-func (v *Viewer) SetPointsPreserveView(pts []pointcloud.Point3D) {
+func (v *Viewer) SetPointsPreserveView(pts []Point3D) {
 	v.canvas.mu.Lock()
 	v.canvas.points = pts
 	v.canvas.convertToSoA()
@@ -509,16 +488,17 @@ func (v *Viewer) SetFPSSize(size float32) {
 // If the FPS display is enabled, both the FPS counter and this callback
 // will be called.
 func (v *Viewer) SetOnFrameDrawn(fn func(time.Duration)) {
-	if v.fpsLabel != nil {
-		fpsFn := v.canvas.onFrameDrawn // the FPS tracking callback
-		v.canvas.onFrameDrawn = func(d time.Duration) {
-			fpsFn(d)
-			if fn != nil {
-				fn(d)
-			}
-		}
-	} else {
+	if v.fpsLabel == nil {
 		v.canvas.onFrameDrawn = fn
+		return
+	}
+
+	fpsFn := v.canvas.onFrameDrawn // the FPS tracking callback
+	v.canvas.onFrameDrawn = func(d time.Duration) {
+		fpsFn(d)
+		if fn != nil {
+			fn(d)
+		}
 	}
 }
 
