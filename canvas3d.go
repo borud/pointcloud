@@ -43,6 +43,12 @@ type canvas3d struct {
 	homeOrientation      Quat
 	maxZoomOutFraction   float64
 
+	// Flythrough mode.
+	flyMode          bool
+	fly              *flythroughCamera
+	grid             *spatialGrid
+	onFlythroughChanged func(bool)
+
 	// Original points kept for Tapped to return the original Point3D.
 	points []Point3D
 
@@ -80,6 +86,7 @@ type canvas3d struct {
 	onOrientationChanged func()
 	onHomeView           func()
 	onZoomChanged        func()
+	onSpeedChanged       func(multiple float64)
 	onPointTapped        func(p Point3D, screenX, screenY float64)
 	onPointCleared       func()
 	onFrameDrawn         func(d time.Duration) // called at end of draw with render time
@@ -155,6 +162,9 @@ func (c *canvas3d) convertToSoA() {
 		}
 	}
 
+	// Build spatial grid for flythrough frustum culling.
+	c.grid, c.xs, c.ys, c.zs, c.rgba = buildGrid(c.xs, c.ys, c.zs, c.rgba)
+
 	c.buildLOD()
 }
 
@@ -223,6 +233,17 @@ func (c *canvas3d) startInteraction() {
 }
 
 func (c *canvas3d) zoomToExtents() {
+	if c.flyMode && c.fly != nil {
+		// In flythrough mode, move camera to see the full cloud.
+		// Place camera at (0, 0, 4) looking toward origin — the same
+		// implicit position as orbit mode's default.
+		c.fly.mu.Lock()
+		c.fly.pos = c.fly.orientation.RotateVec3([3]float64{0, 0, 4.0})
+		c.fly.mu.Unlock()
+		fyne.Do(func() { c.raster.Refresh() })
+		return
+	}
+
 	size := c.Size()
 	w, h := float64(size.Width), float64(size.Height)
 	if w < 1 || h < 1 {
@@ -251,6 +272,17 @@ func (c *canvas3d) fireZoomChanged() {
 }
 
 func (c *canvas3d) homeView() {
+	if c.flyMode && c.fly != nil {
+		// In flythrough mode, reset orientation and move camera to
+		// the home view position without leaving flythrough.
+		c.fly.mu.Lock()
+		c.fly.orientation = c.homeOrientation
+		c.fly.pos = c.homeOrientation.RotateVec3([3]float64{0, 0, 4.0})
+		c.fly.mu.Unlock()
+		fyne.Do(func() { c.raster.Refresh() })
+		return
+	}
+
 	c.mu.Lock()
 	c.orientation = c.homeOrientation
 	c.matrixDirty = true
@@ -287,11 +319,14 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	bg := c.bgColor
 
 	// Use LOD arrays during interaction for responsive frame rates.
+	// Use LOD arrays during interaction for responsive frame rates.
+	// In flythrough mode, skip LOD — the grid-reordered full arrays
+	// are needed and frustum culling provides the perf benefit instead.
 	xs := c.xs
 	ys := c.ys
 	zs := c.zs
 	rgba := c.rgba
-	if c.dragging && c.xsLOD != nil {
+	if c.dragging && c.xsLOD != nil && !c.flyMode {
 		xs = c.xsLOD
 		ys = c.ysLOD
 		zs = c.zsLOD
@@ -347,9 +382,31 @@ func (c *canvas3d) draw(w, h int) image.Image {
 		nWorkers = 1
 	}
 
+	// Compute camera translation. In orbit mode these are the fixed values
+	// that produce identical output to the old `dist = 4.0 - rz` formula.
+	// In flythrough mode, they encode the actual camera transform.
+	var txCam, tyCam, tzCam float32
+	if c.flyMode && c.fly != nil {
+		var vm [9]float64
+		var vtx, vty, vtz float64
+		vm, vtx, vty, vtz = c.fly.viewMatrix()
+		// Replace the rotation matrix with the flythrough view matrix.
+		m0, m1, m2 = float32(vm[0]), float32(vm[1]), float32(vm[2])
+		m3, m4, m5 = float32(vm[3]), float32(vm[4]), float32(vm[5])
+		m6, m7, m8 = float32(vm[6]), float32(vm[7]), float32(vm[8])
+		txCam = float32(vtx)
+		tyCam = float32(vty)
+		tzCam = float32(vtz)
+	} else {
+		txCam = 0
+		tyCam = 0
+		tzCam = 4.0
+	}
+
 	if nWorkers <= 1 {
 		projectChunk(xs, ys, zs, rgba, pix, stride, w, h,
 			m0, m1, m2, m3, m4, m5, m6, m7, m8,
+			txCam, tyCam, tzCam,
 			zoomF, centerX, centerY, defR, defG, defB)
 	} else {
 		var wg sync.WaitGroup
@@ -366,6 +423,7 @@ func (c *canvas3d) draw(w, h int) image.Image {
 				projectChunk(xs[lo:hi], ys[lo:hi], zs[lo:hi], rgba[lo:hi],
 					pix, stride, w, h,
 					m0, m1, m2, m3, m4, m5, m6, m7, m8,
+					txCam, tyCam, tzCam,
 					zoomF, centerX, centerY, defR, defG, defB)
 			}()
 		}
@@ -381,9 +439,15 @@ func (c *canvas3d) draw(w, h int) image.Image {
 
 // projectChunk projects a contiguous slice of points and writes pixels to the
 // shared framebuffer. Called from one goroutine per chunk during parallel draw.
+//
+// The tx, ty, tz parameters encode the camera translation. In orbit mode
+// these are (0, 0, 4.0), which produces the same result as the original
+// `dist = 4.0 - rz` formula. In flythrough mode they encode the full
+// camera transform.
 func projectChunk(
 	xs, ys, zs []float32, rgba []uint32, pix []byte, stride, w, h int,
 	m0, m1, m2, m3, m4, m5, m6, m7, m8 float32,
+	tx, ty, tz float32,
 	zoomF, centerX, centerY float32,
 	defR, defG, defB float32,
 ) {
@@ -391,11 +455,11 @@ func projectChunk(
 		py := ys[i]
 		pz := zs[i]
 
-		rx := m0*px + m1*py + m2*pz
-		ry := m3*px + m4*py + m5*pz
+		rx := m0*px + m1*py + m2*pz + tx
+		ry := m3*px + m4*py + m5*pz + ty
 		rz := m6*px + m7*py + m8*pz
 
-		dist := 4.0 - rz
+		dist := tz - rz
 		if dist < 0.1 {
 			continue
 		}
@@ -411,8 +475,9 @@ func projectChunk(
 		off := iy*stride + ix*4
 		packed := rgba[i]
 
-		// Depth-based shading: clamp shade to [0.3, 1.0].
-		shade := 1.0 - rz*0.15
+		// Depth-based shading: use camera-space depth for consistent
+		// shading in both orbit and flythrough modes.
+		shade := 1.0 - (tz-dist)*0.15
 		if shade < 0.3 {
 			shade = 0.3
 		} else if shade > 1.0 {
@@ -465,6 +530,14 @@ func (c *canvas3d) MouseUp(_ *desktop.MouseEvent) {
 // Dragged implements fyne.Draggable.
 func (c *canvas3d) Dragged(ev *fyne.DragEvent) {
 	c.startInteraction()
+
+	// In flythrough mode, dragging controls the look direction.
+	if c.flyMode && c.fly != nil {
+		c.fly.handleMouseLook(float64(ev.Dragged.DX), float64(ev.Dragged.DY))
+		c.raster.Refresh()
+		return
+	}
+
 	panning := c.dragModifier&fyne.KeyModifierShift != 0
 	if panning {
 		c.mu.Lock()
@@ -512,6 +585,25 @@ func (c *canvas3d) DragEnd() {}
 // Scrolled implements fyne.Scrollable.
 func (c *canvas3d) Scrolled(ev *fyne.ScrollEvent) {
 	c.startInteraction()
+
+	// In flythrough mode, scroll adjusts movement speed multiplier.
+	if c.flyMode && c.fly != nil {
+		c.fly.mu.Lock()
+		c.fly.speedMultiple *= 1.0 + float64(ev.Scrolled.DY)*0.02
+		if c.fly.speedMultiple < 0.25 {
+			c.fly.speedMultiple = 0.25
+		}
+		if c.fly.speedMultiple > 16.0 {
+			c.fly.speedMultiple = 16.0
+		}
+		mult := c.fly.speedMultiple
+		c.fly.mu.Unlock()
+		if c.onSpeedChanged != nil {
+			c.onSpeedChanged(mult)
+		}
+		return
+	}
+
 	c.mu.Lock()
 	c.zoom *= 1.0 + float64(ev.Scrolled.DY)*0.02
 	if mz := c.minZoom(); c.zoom < mz {
@@ -553,11 +645,24 @@ func (c *canvas3d) TypedRune(r rune) {
 		}
 	case 'f':
 		c.zoomToExtents()
+	case 'g':
+		c.setFlythrough(!c.flyMode)
 	}
 }
 
 // TypedKey implements fyne.Focusable.
 func (c *canvas3d) TypedKey(ev *fyne.KeyEvent) {
+	// Esc exits flythrough mode.
+	if ev.Name == fyne.KeyEscape && c.flyMode {
+		c.setFlythrough(false)
+		return
+	}
+
+	// In flythrough mode, arrow keys are handled by KeyDown/KeyUp.
+	if c.flyMode {
+		return
+	}
+
 	const angle = 0.087 // ~5 degrees
 	var dq Quat
 	switch ev.Name {
@@ -581,6 +686,95 @@ func (c *canvas3d) TypedKey(ev *fyne.KeyEvent) {
 		c.onOrientationChanged()
 	}
 }
+
+// KeyDown implements desktop.Keyable — tracks held keys for flythrough movement.
+func (c *canvas3d) KeyDown(ev *fyne.KeyEvent) {
+	if !c.flyMode || c.fly == nil {
+		return
+	}
+	c.fly.mu.Lock()
+	if ev.Name == desktop.KeyShiftLeft || ev.Name == desktop.KeyShiftRight {
+		c.fly.shiftHeld = true
+	} else {
+		c.fly.keysHeld[ev.Name] = true
+	}
+	c.fly.mu.Unlock()
+
+	// Start the ticker if not already running.
+	if c.fly.hasKeysHeld() {
+		c.fly.start()
+	}
+}
+
+// KeyUp implements desktop.Keyable — releases held keys.
+func (c *canvas3d) KeyUp(ev *fyne.KeyEvent) {
+	if !c.flyMode || c.fly == nil {
+		return
+	}
+	c.fly.mu.Lock()
+	if ev.Name == desktop.KeyShiftLeft || ev.Name == desktop.KeyShiftRight {
+		c.fly.shiftHeld = false
+	} else {
+		delete(c.fly.keysHeld, ev.Name)
+	}
+	c.fly.mu.Unlock()
+
+	// Stop the ticker when no keys are held.
+	if !c.fly.hasKeysHeld() {
+		c.fly.stop()
+	}
+}
+
+// setFlythrough toggles flythrough mode on or off.
+func (c *canvas3d) setFlythrough(on bool) {
+	if c.flyMode == on {
+		return
+	}
+
+	if on {
+		// Orbit → Flythrough transition.
+		c.fly = newFlythroughCamera(c)
+		c.mu.Lock()
+		c.fly.fromOrbit(c.orientation, c.zoom, c.panX, c.panY)
+		// Pan is now baked into the camera position.
+		c.panX = 0
+		c.panY = 0
+		c.flyMode = true
+		c.mu.Unlock()
+	} else {
+		// Flythrough → Orbit transition.
+		if c.fly != nil {
+			c.fly.stop()
+			c.mu.Lock()
+			orient, zoom := c.fly.toOrbit(c.zoom)
+			c.orientation = orient
+			c.matrixDirty = true
+			c.zoom = zoom
+			if mz := c.minZoom(); c.zoom < mz {
+				c.zoom = mz
+			}
+			c.panX = 0
+			c.panY = 0
+			c.flyMode = false
+			c.mu.Unlock()
+		} else {
+			c.mu.Lock()
+			c.flyMode = false
+			c.mu.Unlock()
+		}
+	}
+
+	c.raster.Refresh()
+	if c.onOrientationChanged != nil {
+		c.onOrientationChanged()
+	}
+	if c.onFlythroughChanged != nil {
+		c.onFlythroughChanged(on)
+	}
+}
+
+// Compile-time checks for interface implementations.
+var _ desktop.Keyable = (*canvas3d)(nil)
 
 // Tapped implements fyne.Tappable — picks the nearest point to the click.
 func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
@@ -623,6 +817,21 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	m3, m4, m5 := float32(m64[3]), float32(m64[4]), float32(m64[5])
 	m6, m7, m8 := float32(m64[6]), float32(m64[7]), float32(m64[8])
 
+	var txCam, tyCam, tzCam float32
+	if c.flyMode && c.fly != nil {
+		vm, vtx, vty, vtz := c.fly.viewMatrix()
+		m0, m1, m2 = float32(vm[0]), float32(vm[1]), float32(vm[2])
+		m3, m4, m5 = float32(vm[3]), float32(vm[4]), float32(vm[5])
+		m6, m7, m8 = float32(vm[6]), float32(vm[7]), float32(vm[8])
+		txCam = float32(vtx)
+		tyCam = float32(vty)
+		tzCam = float32(vtz)
+	} else {
+		txCam = 0
+		tyCam = 0
+		tzCam = 4.0
+	}
+
 	centerX := float32(pixW)/2 + float32(panX)*float32(scaleX)
 	centerY := float32(pixH)/2 + float32(panY)*float32(scaleY)
 
@@ -635,11 +844,11 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 		py := ys[i]
 		pz := zs[i]
 
-		rx := m0*px + m1*py + m2*pz
-		ry := m3*px + m4*py + m5*pz
+		rx := m0*px + m1*py + m2*pz + txCam
+		ry := m3*px + m4*py + m5*pz + tyCam
 		rz := m6*px + m7*py + m8*pz
 
-		dist := float32(4.0) - rz
+		dist := tzCam - rz
 		if dist < 0.1 {
 			continue
 		}

@@ -84,6 +84,23 @@ func BenchmarkClear_1080p(b *testing.B) {
 	}
 }
 
+// BenchmarkDraw_Flythrough_1M measures draw with flythrough camera inside cloud.
+func BenchmarkDraw_Flythrough_1M(b *testing.B) {
+	pts := generatePoints(1_000_000)
+	c := setupCanvas(pts)
+	c.flyMode = true
+	c.fly = newFlythroughCamera(c)
+	c.fly.pos = [3]float64{0, 0, 0} // camera at center of cloud
+	c.fly.orientation = QuatIdentity()
+	w, h := 1024, 768
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		c.draw(w, h)
+	}
+}
+
 // BenchmarkProjection_1M measures only the projection math (no pixel writes).
 func BenchmarkProjection_1M(b *testing.B) {
 	pts := generatePoints(1_000_000)

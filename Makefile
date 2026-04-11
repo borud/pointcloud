@@ -17,9 +17,11 @@ BINARIES := $(notdir $(shell find cmd -mindepth 1 -maxdepth 1 -type d))
 
 all: lint vet staticcheck test build
 
+build: $(BINARIES)
+
 $(BINARIES):
 	@echo "*** $@"
-	@cd cmd/$@ && CGO_ENABLED=0 go build $(LDFLAGS) -trimpath -o ../../bin/$@
+	@cd cmd/$@ && go build $(LDFLAGS) -trimpath -o ../../bin/$@
 
 run:
 	@echo "*** $@"
