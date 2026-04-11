@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"path/filepath"
 	"strings"
-
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -153,6 +152,133 @@ func (t *tappable) Tapped(_ *fyne.PointEvent) {
 	if t.onTap != nil {
 		t.onTap()
 	}
+}
+
+func rgbaCode(c color.RGBA) string {
+	return fmt.Sprintf("color.RGBA{%d, %d, %d, %d}", c.R, c.G, c.B, c.A)
+}
+
+func styleCode(s fyne.TextStyle) string {
+	switch {
+	case s.Bold && s.Italic:
+		return "fyne.TextStyle{Bold: true, Italic: true}"
+	case s.Monospace:
+		return "fyne.TextStyle{Monospace: true}"
+	case s.Bold:
+		return "fyne.TextStyle{Bold: true}"
+	case s.Italic:
+		return "fyne.TextStyle{Italic: true}"
+	default:
+		return "fyne.TextStyle{}"
+	}
+}
+
+type codeGenState struct {
+	bgColor        color.RGBA
+	pointColor     color.RGBA
+	infoLabelColor color.RGBA
+	infoLabelStyle fyne.TextStyle
+	cubeColors     pointcloud.CubeColors
+	showCube       bool
+	showHome       bool
+	showZoomFit    bool
+	showInfo       bool
+	showScaleBar   bool
+	showFPS        bool
+	lodEnabled     bool
+	fpsColor       color.RGBA
+	fpsStyle       fyne.TextStyle
+	scaleBarColor  color.RGBA
+	scaleUnit      string
+	scaleUnitScale float64
+	zoomOutFrac    float64
+	upAxis         pointcloud.UpAxis
+}
+
+func generateCode(s codeGenState) string {
+	var b strings.Builder
+	b.WriteString("v := pointcloud.New(\n")
+
+	defaults := pointcloud.DefaultCubeColors()
+
+	// Only emit options that differ from defaults.
+	type opt struct {
+		cond bool
+		line string
+	}
+	opts := []opt{
+		{s.bgColor != defaultBgColor, fmt.Sprintf("\tpointcloud.WithBackgroundColor(%s),", rgbaCode(s.bgColor))},
+		{s.pointColor != defaultPointColor, fmt.Sprintf("\tpointcloud.WithDefaultPointColor(%s),", rgbaCode(s.pointColor))},
+		{s.infoLabelColor != defaultInfoLabelColor, fmt.Sprintf("\tpointcloud.WithInfoLabelColor(%s),", rgbaCode(s.infoLabelColor))},
+		{s.infoLabelStyle != defaultInfoLabelStyle, fmt.Sprintf("\tpointcloud.WithInfoLabelStyle(%s),", styleCode(s.infoLabelStyle))},
+		{s.cubeColors != defaults, ""},
+		{!s.showCube, "\tpointcloud.WithOrientationCube(false),"},
+		{!s.showHome, "\tpointcloud.WithHomeButton(false),"},
+		{!s.showZoomFit, "\tpointcloud.WithZoomFitButton(false),"},
+		{!s.showInfo, "\tpointcloud.WithInfoLabel(false),"},
+		{!s.showScaleBar, "\tpointcloud.WithScaleBar(false),"},
+		{s.scaleBarColor != (color.RGBA{200, 200, 200, 255}), fmt.Sprintf("\tpointcloud.WithScaleBarColor(%s),", rgbaCode(s.scaleBarColor))},
+		{s.scaleUnit != "", fmt.Sprintf("\tpointcloud.WithScaleUnit(%q),", s.scaleUnit)},
+		{s.scaleUnitScale != 1.0, fmt.Sprintf("\tpointcloud.WithScaleUnitScale(%g),", s.scaleUnitScale)},
+		{s.zoomOutFrac != 0.2, fmt.Sprintf("\tpointcloud.WithMaxZoomOutFraction(%g),", s.zoomOutFrac)},
+		{s.showFPS, "\tpointcloud.WithFPS(true),"},
+		{s.showFPS && s.fpsColor != (color.RGBA{200, 200, 200, 255}), fmt.Sprintf("\tpointcloud.WithFPSColor(%s),", rgbaCode(s.fpsColor))},
+		{s.showFPS && s.fpsStyle != (fyne.TextStyle{Monospace: true}), fmt.Sprintf("\tpointcloud.WithFPSStyle(%s),", styleCode(s.fpsStyle))},
+	}
+
+	// Handle cube colors separately since it's a struct.
+	if s.cubeColors != defaults {
+		var cb strings.Builder
+		cb.WriteString("\tpointcloud.WithCubeColors(pointcloud.CubeColors{\n")
+		cb.WriteString("\t\tFaces: [6]color.RGBA{\n")
+		faceNames := [6]string{"Z+", "Z-", "X+", "X-", "Y+", "Y-"}
+		for i, f := range s.cubeColors.Faces {
+			fmt.Fprintf(&cb, "\t\t\t%s, // %s\n", rgbaCode(f), faceNames[i])
+		}
+		cb.WriteString("\t\t},\n")
+		fmt.Fprintf(&cb, "\t\tEdgeColor:  %s,\n", rgbaCode(s.cubeColors.EdgeColor))
+		fmt.Fprintf(&cb, "\t\tLabelColor: %s,\n", rgbaCode(s.cubeColors.LabelColor))
+		cb.WriteString("\t\tAxisColors: [3]color.RGBA{\n")
+		axisNames := [3]string{"X", "Y", "Z"}
+		for i, a := range s.cubeColors.AxisColors {
+			fmt.Fprintf(&cb, "\t\t\t%s, // %s\n", rgbaCode(a), axisNames[i])
+		}
+		cb.WriteString("\t\t},\n")
+		cb.WriteString("\t}),")
+		// Replace the empty placeholder.
+		for i, o := range opts {
+			if o.cond && o.line == "" {
+				opts[i].line = cb.String()
+				break
+			}
+		}
+	}
+
+	hasOpts := false
+	for _, o := range opts {
+		if o.cond {
+			b.WriteString(o.line)
+			b.WriteByte('\n')
+			hasOpts = true
+		}
+	}
+
+	if hasOpts {
+		b.WriteString(")\n")
+	} else {
+		b.Reset()
+		b.WriteString("v := pointcloud.New()\n")
+	}
+
+	// Post-construction settings.
+	if s.upAxis == pointcloud.ZUp {
+		b.WriteString("v.SetUpAxis(pointcloud.ZUp)\n")
+	}
+	if s.lodEnabled {
+		b.WriteString("v.SetLODEnabled(true)\n")
+	}
+
+	return b.String()
 }
 
 func main() {
@@ -614,7 +740,47 @@ func main() {
 		rebuildViewer()
 	})
 
-	settingsContent := container.NewVBox(renderSection, canvasSection, fontSection, zoomSection, scaleSection, cubeSection, visSection, fpsSection, resetBtn)
+	genCodeBtn := widget.NewButton("Generate Code", func() {
+		code := generateCode(codeGenState{
+			bgColor:        bgColor,
+			pointColor:     pointColor,
+			infoLabelColor: infoLabelColor,
+			infoLabelStyle: infoLabelStyle,
+			cubeColors:     cubeColors,
+			showCube:       showCube,
+			showHome:       showHome,
+			showZoomFit:    showZoomFit,
+			showInfo:       showInfo,
+			showScaleBar:   showScaleBar,
+			showFPS:        showFPS,
+			lodEnabled:     lodEnabled,
+			fpsColor:       fpsColor,
+			fpsStyle:       fpsStyle,
+			scaleBarColor:  scaleBarColor,
+			scaleUnit:      scaleUnit,
+			scaleUnitScale: scaleUnitScale,
+			zoomOutFrac:    zoomOutFraction,
+			upAxis:         currentUpAxis,
+		})
+
+		codeEntry := widget.NewMultiLineEntry()
+		codeEntry.SetText(code)
+		codeEntry.TextStyle = fyne.TextStyle{Monospace: true}
+
+		copyBtn := widget.NewButton("Copy to Clipboard", func() {
+			myApp.Clipboard().SetContent(code)
+		})
+
+		content := container.NewBorder(nil, copyBtn, nil, nil,
+			container.NewScroll(codeEntry),
+		)
+
+		dlg := dialog.NewCustom("Generated Code", "Close", content, myWindow)
+		dlg.Resize(fyne.NewSize(600, 400))
+		dlg.Show()
+	})
+
+	settingsContent := container.NewVBox(renderSection, canvasSection, fontSection, zoomSection, scaleSection, cubeSection, visSection, fpsSection, genCodeBtn, resetBtn)
 	settingsScroll := container.NewVScroll(settingsContent)
 	settingsScroll.SetMinSize(fyne.NewSize(240, 0))
 
