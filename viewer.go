@@ -533,6 +533,21 @@ func (v *Viewer) SetLODTargetSize(n int) {
 	v.canvas.mu.Unlock()
 }
 
+// SetFPSEnabled shows or hides the FPS counter. The viewer must have been
+// created with [WithFPS](true) for this to have any effect.
+func (v *Viewer) SetFPSEnabled(on bool) {
+	if v.fpsLabel == nil {
+		return
+	}
+	fyne.Do(func() {
+		if on {
+			v.fpsLabel.Show()
+		} else {
+			v.fpsLabel.Hide()
+		}
+	})
+}
+
 // SetFPSColor sets the FPS counter text color.
 func (v *Viewer) SetFPSColor(c color.RGBA) {
 	if v.fpsLabel != nil {
