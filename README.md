@@ -1,12 +1,22 @@
 # Point Cloud Viewer
 
-![Gopher](images/gopher-small.png)
+A simple point cloud viewer built with [Fyne](https://fyne.io/). This repository primarily offers a Fyne widget for viewing point clouds, but it also contains a standalone viewer. The standalone viewer 
+
+Reads PLY, PCD, PTS, and XYZ files and renders them as interactive 3D point clouds with mouse-controlled rotation and zoom.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/borud/pointcloud.svg)](https://pkg.go.dev/github.com/borud/pointcloud)
 
-A simple point cloud viewer built with [Fyne](https://fyne.io/) and OpenGL. Reads PLY, PCD, PTS, and XYZ files and renders them as interactive 3D point clouds with mouse-controlled rotation and zoom.
+![Gopher](images/gopher-small.png)
 
-![Screenshot](images/screenshot.png)
+## Examples
+
+Viewing 970k point goat scull from from [Artec 3D](https://www.artec3d.com/).
+
+![Screenshot](images/goat.png)
+
+Simulated seabed from `_examples/seabed`.
+
+![Screenshot](images/seabed.png)
 
 ## Features
 

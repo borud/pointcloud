@@ -356,11 +356,7 @@ func main() {
 	v := buildViewer()
 	statusLabel := widget.NewLabel("No file loaded")
 
-	const pad float32 = 40
-	viewerArea := container.New(
-		layout.NewCustomPaddedLayout(pad, pad, pad, pad),
-		v,
-	)
+	viewerArea := container.NewStack(v)
 
 	// onFlythroughChanged is set after flyCheck is created and used by
 	// rebuildViewer to re-wire the callback on the new viewer.
@@ -805,10 +801,21 @@ func main() {
 	settingsScroll := container.NewVScroll(settingsContent)
 	settingsScroll.SetMinSize(fyne.NewSize(240, 0))
 
-	settingsPanel := container.New(
-		layout.NewCustomPaddedLayout(pad, pad, pad, pad),
-		settingsScroll,
-	)
+	settingsPanel := container.NewStack(settingsScroll)
+
+	settingsVisible := false
+	settingsPanel.Hide()
+	toggleSettings := func() {
+		settingsVisible = !settingsVisible
+		if settingsVisible {
+			settingsPanel.Show()
+		} else {
+			settingsPanel.Hide()
+		}
+	}
+
+	toolbar.Append(widget.NewToolbarSeparator())
+	toolbar.Append(widget.NewToolbarAction(theme.SettingsIcon(), toggleSettings))
 
 	top := container.NewBorder(nil, nil, nil,
 		statusLabel,
