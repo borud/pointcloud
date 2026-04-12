@@ -21,7 +21,7 @@ build: $(BINARIES)
 
 $(BINARIES):
 	@echo "*** $@"
-	@cd cmd/$@ && go build $(LDFLAGS) -trimpath -o ../../bin/$@
+	@cd cmd/$@ && CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" go build $(LDFLAGS) -trimpath -o ../../bin/$@
 
 run:
 	@echo "*** $@"
@@ -29,7 +29,7 @@ run:
 
 test:
 	@echo "*** $@"
-	@go test ./...
+	@CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" go test ./...
 
 bench:
 	@echo "*** $@"
