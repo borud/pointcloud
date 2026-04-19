@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -101,15 +102,15 @@ func ReadPLY(r io.Reader) (*PointCloud, error) {
 	}
 	hasColor := rIdx >= 0 && gIdx >= 0 && bIdx >= 0
 
-	pc := &PointCloud{Points: make([]Point3D, 0, vertexCount)}
+	acc := newPointAccumulator(vertexCount)
 
 	switch format {
 	case "ascii":
-		err = readPLYASCII(br, pc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor)
+		err = readPLYASCII(br, &acc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor)
 	case "binary_little_endian":
-		err = readPLYBinary(br, pc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor, binary.LittleEndian)
+		err = readPLYBinary(br, &acc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor, binary.LittleEndian)
 	case "binary_big_endian":
-		err = readPLYBinary(br, pc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor, binary.BigEndian)
+		err = readPLYBinary(br, &acc, vertexCount, properties, xIdx, yIdx, zIdx, rIdx, gIdx, bIdx, hasColor, binary.BigEndian)
 	default:
 		return nil, fmt.Errorf("unsupported PLY format: %s", format)
 	}
@@ -118,11 +119,10 @@ func ReadPLY(r io.Reader) (*PointCloud, error) {
 		return nil, err
 	}
 
-	pc.ComputeBounds()
-	return pc, nil
+	return acc.finish(fmt.Errorf("PLY file has no vertices"))
 }
 
-func readPLYASCII(br *bufio.Reader, pc *PointCloud, count int, _ []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool) error {
+func readPLYASCII(br *bufio.Reader, acc *pointAccumulator, count int, _ []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool) error {
 	maxIdx := maxFieldIndex(xi, yi, zi)
 	if hasColor {
 		maxIdx = maxFieldIndex(maxIdx, ri, gi, bi)
@@ -138,25 +138,41 @@ func readPLYASCII(br *bufio.Reader, pc *PointCloud, count int, _ []plyProperty, 
 			return fmt.Errorf("PLY vertex %d: expected at least %d fields, got %d", i, maxIdx+1, len(fields))
 		}
 
-		var x, y, z float64
-		fmt.Sscanf(fields[xi], "%f", &x)
-		fmt.Sscanf(fields[yi], "%f", &y)
-		fmt.Sscanf(fields[zi], "%f", &z)
+		x, err := strconv.ParseFloat(fields[xi], 64)
+		if err != nil {
+			return fmt.Errorf("PLY vertex %d: invalid x value %q: %w", i, fields[xi], err)
+		}
+		y, err := strconv.ParseFloat(fields[yi], 64)
+		if err != nil {
+			return fmt.Errorf("PLY vertex %d: invalid y value %q: %w", i, fields[yi], err)
+		}
+		z, err := strconv.ParseFloat(fields[zi], 64)
+		if err != nil {
+			return fmt.Errorf("PLY vertex %d: invalid z value %q: %w", i, fields[zi], err)
+		}
 		p := Point3D{X: x, Y: y, Z: z}
 		if hasColor {
-			var r, g, b int
-			fmt.Sscanf(fields[ri], "%d", &r)
-			fmt.Sscanf(fields[gi], "%d", &g)
-			fmt.Sscanf(fields[bi], "%d", &b)
+			r, err := strconv.ParseUint(fields[ri], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PLY vertex %d: invalid red value %q: %w", i, fields[ri], err)
+			}
+			g, err := strconv.ParseUint(fields[gi], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PLY vertex %d: invalid green value %q: %w", i, fields[gi], err)
+			}
+			b, err := strconv.ParseUint(fields[bi], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PLY vertex %d: invalid blue value %q: %w", i, fields[bi], err)
+			}
 			p.R, p.G, p.B = uint8(r), uint8(g), uint8(b)
 			p.HasColor = true
 		}
-		pc.Points = append(pc.Points, p)
+		acc.appendPoint(p)
 	}
 	return nil
 }
 
-func readPLYBinary(br *bufio.Reader, pc *PointCloud, count int, props []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool, order binary.ByteOrder) error {
+func readPLYBinary(br *bufio.Reader, acc *pointAccumulator, count int, props []plyProperty, xi, yi, zi, ri, gi, bi int, hasColor bool, order binary.ByteOrder) error {
 	// Compute byte offsets for each property.
 	offsets := make([]int, len(props))
 	sizes := make([]int, len(props))
@@ -184,7 +200,7 @@ func readPLYBinary(br *bufio.Reader, pc *PointCloud, count int, props []plyPrope
 			p.B = uint8(readPLYFloat(buf[offsets[bi]:], props[bi].dataType, order))
 			p.HasColor = true
 		}
-		pc.Points = append(pc.Points, p)
+		acc.appendPoint(p)
 	}
 	return nil
 }

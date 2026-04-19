@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -93,16 +94,16 @@ readData:
 	hasRGB := rgbIdx >= 0
 	hasSeparateColor := rIdx >= 0 && gIdx >= 0 && bIdx >= 0
 
-	pc := &PointCloud{Points: make([]Point3D, 0, pointCount)}
+	acc := newPointAccumulator(pointCount)
 
 	switch dataFormat {
 	case "ascii":
-		err := readPCDASCII(br, pc, pointCount, fieldNames, xIdx, yIdx, zIdx, rgbIdx, rIdx, gIdx, bIdx, hasRGB, hasSeparateColor)
+		err := readPCDASCII(br, &acc, pointCount, fieldNames, xIdx, yIdx, zIdx, rgbIdx, rIdx, gIdx, bIdx, hasRGB, hasSeparateColor)
 		if err != nil {
 			return nil, err
 		}
 	case "binary":
-		err := readPCDBinary(br, pc, pointCount, fieldSizes, fieldTypes, xIdx, yIdx, zIdx, rgbIdx, rIdx, gIdx, bIdx, hasRGB, hasSeparateColor)
+		err := readPCDBinary(br, &acc, pointCount, fieldSizes, fieldTypes, xIdx, yIdx, zIdx, rgbIdx, rIdx, gIdx, bIdx, hasRGB, hasSeparateColor)
 		if err != nil {
 			return nil, err
 		}
@@ -110,11 +111,10 @@ readData:
 		return nil, fmt.Errorf("unsupported PCD data format: %s", dataFormat)
 	}
 
-	pc.ComputeBounds()
-	return pc, nil
+	return acc.finish(fmt.Errorf("PCD file has no points"))
 }
 
-func readPCDASCII(br *bufio.Reader, pc *PointCloud, count int, _ []string, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
+func readPCDASCII(br *bufio.Reader, acc *pointAccumulator, count int, _ []string, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
 	maxIdx := maxFieldIndex(xi, yi, zi)
 	if hasRGB {
 		maxIdx = maxFieldIndex(maxIdx, rgbi)
@@ -133,33 +133,51 @@ func readPCDASCII(br *bufio.Reader, pc *PointCloud, count int, _ []string, xi, y
 			continue
 		}
 
-		var x, y, z float64
-		fmt.Sscanf(parts[xi], "%f", &x)
-		fmt.Sscanf(parts[yi], "%f", &y)
-		fmt.Sscanf(parts[zi], "%f", &z)
+		x, err := strconv.ParseFloat(parts[xi], 64)
+		if err != nil {
+			return fmt.Errorf("PCD point %d: invalid x value %q: %w", i, parts[xi], err)
+		}
+		y, err := strconv.ParseFloat(parts[yi], 64)
+		if err != nil {
+			return fmt.Errorf("PCD point %d: invalid y value %q: %w", i, parts[yi], err)
+		}
+		z, err := strconv.ParseFloat(parts[zi], 64)
+		if err != nil {
+			return fmt.Errorf("PCD point %d: invalid z value %q: %w", i, parts[zi], err)
+		}
 		p := Point3D{X: x, Y: y, Z: z}
 		if hasRGB {
-			var rgbf float64
-			fmt.Sscanf(parts[rgbi], "%f", &rgbf)
+			rgbf, err := strconv.ParseFloat(parts[rgbi], 64)
+			if err != nil {
+				return fmt.Errorf("PCD point %d: invalid rgb value %q: %w", i, parts[rgbi], err)
+			}
 			rgb := math.Float32bits(float32(rgbf))
 			p.R = uint8((rgb >> 16) & 0xFF)
 			p.G = uint8((rgb >> 8) & 0xFF)
 			p.B = uint8(rgb & 0xFF)
 			p.HasColor = true
 		} else if hasSeparateColor {
-			var r, g, b int
-			fmt.Sscanf(parts[ri], "%d", &r)
-			fmt.Sscanf(parts[gi], "%d", &g)
-			fmt.Sscanf(parts[bi], "%d", &b)
+			r, err := strconv.ParseUint(parts[ri], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PCD point %d: invalid red value %q: %w", i, parts[ri], err)
+			}
+			g, err := strconv.ParseUint(parts[gi], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PCD point %d: invalid green value %q: %w", i, parts[gi], err)
+			}
+			b, err := strconv.ParseUint(parts[bi], 10, 8)
+			if err != nil {
+				return fmt.Errorf("PCD point %d: invalid blue value %q: %w", i, parts[bi], err)
+			}
 			p.R, p.G, p.B = uint8(r), uint8(g), uint8(b)
 			p.HasColor = true
 		}
-		pc.Points = append(pc.Points, p)
+		acc.appendPoint(p)
 	}
 	return nil
 }
 
-func readPCDBinary(br *bufio.Reader, pc *PointCloud, count int, sizes []int, types []byte, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
+func readPCDBinary(br *bufio.Reader, acc *pointAccumulator, count int, sizes []int, types []byte, xi, yi, zi, rgbi, ri, gi, bi int, hasRGB, hasSeparateColor bool) error {
 	// Compute stride and offsets.
 	offsets := make([]int, len(sizes))
 	stride := 0
@@ -190,7 +208,7 @@ func readPCDBinary(br *bufio.Reader, pc *PointCloud, count int, sizes []int, typ
 			p.B = uint8(readPCDFloat(buf[offsets[bi]:], sizes[bi], types[bi]))
 			p.HasColor = true
 		}
-		pc.Points = append(pc.Points, p)
+		acc.appendPoint(p)
 	}
 	return nil
 }

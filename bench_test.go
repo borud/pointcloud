@@ -1,6 +1,8 @@
 package pointcloud
 
 import (
+	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"math/rand/v2"
@@ -125,6 +127,87 @@ func BenchmarkProjection_1M(b *testing.B) {
 			}
 			_ = (rx/dist)*zoom + centerX
 			_ = (ry/dist)*zoom + centerY
+		}
+	}
+}
+
+func BenchmarkBuildGrid_1M(b *testing.B) {
+	pts := generatePoints(1_000_000)
+	c := &canvas3d{points: pts}
+	c.xs = make([]float32, len(pts))
+	c.ys = make([]float32, len(pts))
+	c.zs = make([]float32, len(pts))
+	c.rgba = make([]uint32, len(pts))
+	c.originalIndex = make([]int, len(pts))
+	for i, p := range pts {
+		c.xs[i] = float32(p.X)
+		c.ys[i] = float32(p.Y)
+		c.zs[i] = float32(p.Z)
+		c.originalIndex[i] = i
+		if p.HasColor {
+			c.rgba[i] = hasColorBit | uint32(p.R)<<16 | uint32(p.G)<<8 | uint32(p.B)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_, _, _, _, _, _ = buildGrid(c.xs, c.ys, c.zs, c.rgba, c.originalIndex)
+	}
+}
+
+func BenchmarkFrustumCulling_1M(b *testing.B) {
+	pts := generatePoints(1_000_000)
+	c := setupCanvas(pts)
+	vm := QuatIdentity().ToMatrix()
+	planes := extractFrustumPlanes(vm, 0, 0, 4.0, 200, 1024.0/768.0)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = c.grid.visibleCells(planes)
+	}
+}
+
+func BenchmarkReadXYZ_100k(b *testing.B) {
+	var buf bytes.Buffer
+	for _, p := range generatePoints(100_000) {
+		if p.HasColor {
+			fmt.Fprintf(&buf, "%f %f %f %d %d %d\n", p.X, p.Y, p.Z, p.R, p.G, p.B)
+		} else {
+			fmt.Fprintf(&buf, "%f %f %f\n", p.X, p.Y, p.Z)
+		}
+	}
+	data := buf.Bytes()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for range b.N {
+		if _, err := ReadXYZ(bytes.NewReader(data)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReadPTS_100k(b *testing.B) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%d\n", 100_000)
+	for _, p := range generatePoints(100_000) {
+		if p.HasColor {
+			fmt.Fprintf(&buf, "%f %f %f 1 %d %d %d\n", p.X, p.Y, p.Z, p.R, p.G, p.B)
+		} else {
+			fmt.Fprintf(&buf, "%f %f %f 1\n", p.X, p.Y, p.Z)
+		}
+	}
+	data := buf.Bytes()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for range b.N {
+		if _, err := ReadPTS(bytes.NewReader(data)); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

@@ -146,7 +146,7 @@ func TestBuildGrid(t *testing.T) {
 	pts := generatePoints(10000)
 	c := setupCanvas(pts)
 
-	g, xs, ys, zs, rgba := buildGrid(c.xs, c.ys, c.zs, c.rgba)
+	g, xs, ys, zs, rgba, indices := buildGrid(c.xs, c.ys, c.zs, c.rgba, c.originalIndex)
 	if g == nil {
 		t.Fatal("buildGrid returned nil")
 	}
@@ -163,13 +163,14 @@ func TestBuildGrid(t *testing.T) {
 	_ = ys
 	_ = zs
 	_ = rgba
+	_ = indices
 }
 
 func TestGridFrustumCulling(t *testing.T) {
 	pts := generatePoints(10000)
 	c := setupCanvas(pts)
 
-	g, _, _, _, _ := buildGrid(c.xs, c.ys, c.zs, c.rgba)
+	g, _, _, _, _, _ := buildGrid(c.xs, c.ys, c.zs, c.rgba, c.originalIndex)
 	if g == nil {
 		t.Fatal("buildGrid returned nil")
 	}
@@ -182,5 +183,17 @@ func TestGridFrustumCulling(t *testing.T) {
 	// With a generous frustum from distance 4, most cells should be visible.
 	if len(cells) == 0 {
 		t.Error("frustum culling removed all cells")
+	}
+}
+
+func TestBuildGridPreservesOriginalIndexMapping(t *testing.T) {
+	pts := generatePoints(1000)
+	c := setupCanvas(pts)
+
+	for i, idx := range c.originalIndex {
+		p := pts[idx]
+		if gotX := float64(c.xs[i]); math.Abs(gotX-p.X) > 1e-6 {
+			t.Fatalf("xs[%d] maps to wrong point: got %.6f want %.6f", i, gotX, p.X)
+		}
 	}
 }

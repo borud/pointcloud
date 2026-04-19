@@ -30,27 +30,29 @@ type canvas3d struct {
 	widget.BaseWidget
 	raster *canvas.Raster
 
-	mu           sync.Mutex
-	orientation  Quat
-	cachedMatrix [9]float64
-	matrixDirty  bool
-	zoom         float64
-	panX         float64
-	panY         float64
-	up           UpAxis
-	bgColor              color.RGBA
-	defaultPointColor    color.RGBA
-	homeOrientation      Quat
-	maxZoomOutFraction   float64
+	mu                 sync.Mutex
+	orientation        Quat
+	cachedMatrix       [9]float64
+	matrixDirty        bool
+	zoom               float64
+	panX               float64
+	panY               float64
+	up                 UpAxis
+	bgColor            color.RGBA
+	defaultPointColor  color.RGBA
+	homeOrientation    Quat
+	maxZoomOutFraction float64
 
 	// Flythrough mode.
-	flyMode          bool
-	fly              *flythroughCamera
-	grid             *spatialGrid
+	flyMode             bool
+	fly                 *flythroughCamera
+	grid                *spatialGrid
 	onFlythroughChanged func(bool)
 
 	// Original points kept for Tapped to return the original Point3D.
 	points []Point3D
+	// originalIndex maps the reordered SoA entry back to points[].
+	originalIndex []int
 
 	// SoA (Structure-of-Arrays) storage in float32 for the hot rendering
 	// loop. The Z-up swap is applied at conversion time so the inner loop
@@ -61,7 +63,8 @@ type canvas3d struct {
 	// Decimated SoA arrays for LOD during interaction. Built in convertToSoA
 	// when the point count exceeds lodTargetSize.
 	xsLOD, ysLOD, zsLOD []float32
-	rgbaLOD              []uint32
+	rgbaLOD             []uint32
+	originalIndexLOD    []int
 
 	// LOD configuration.
 	lodEnabled    bool // whether LOD decimation is active during interaction
@@ -142,9 +145,11 @@ func (c *canvas3d) convertToSoA() {
 	c.ys = make([]float32, n)
 	c.zs = make([]float32, n)
 	c.rgba = make([]uint32, n)
+	c.originalIndex = make([]int, n)
 
 	zup := c.up == ZUp
 	for i, p := range c.points {
+		c.originalIndex[i] = i
 		if zup {
 			c.xs[i] = float32(p.X)
 			c.ys[i] = float32(p.Z)
@@ -163,7 +168,8 @@ func (c *canvas3d) convertToSoA() {
 	}
 
 	// Build spatial grid for flythrough frustum culling.
-	c.grid, c.xs, c.ys, c.zs, c.rgba = buildGrid(c.xs, c.ys, c.zs, c.rgba)
+	c.grid, c.xs, c.ys, c.zs, c.rgba, c.originalIndex =
+		buildGrid(c.xs, c.ys, c.zs, c.rgba, c.originalIndex)
 
 	c.buildLOD()
 }
@@ -179,6 +185,7 @@ func (c *canvas3d) buildLOD() {
 		c.ysLOD = nil
 		c.zsLOD = nil
 		c.rgbaLOD = nil
+		c.originalIndexLOD = nil
 		return
 	}
 
@@ -192,18 +199,21 @@ func (c *canvas3d) buildLOD() {
 	c.ysLOD = make([]float32, lodN)
 	c.zsLOD = make([]float32, lodN)
 	c.rgbaLOD = make([]uint32, lodN)
+	c.originalIndexLOD = make([]int, lodN)
 	j := 0
 	for i := 0; i < n; i += step {
 		c.xsLOD[j] = c.xs[i]
 		c.ysLOD[j] = c.ys[i]
 		c.zsLOD[j] = c.zs[i]
 		c.rgbaLOD[j] = c.rgba[i]
+		c.originalIndexLOD[j] = c.originalIndex[i]
 		j++
 	}
 	c.xsLOD = c.xsLOD[:j]
 	c.ysLOD = c.ysLOD[:j]
 	c.zsLOD = c.zsLOD[:j]
 	c.rgbaLOD = c.rgbaLOD[:j]
+	c.originalIndexLOD = c.originalIndexLOD[:j]
 }
 
 // startInteraction marks the canvas as actively interacting, switching to
@@ -386,6 +396,8 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	// that produce identical output to the old `dist = 4.0 - rz` formula.
 	// In flythrough mode, they encode the actual camera transform.
 	var txCam, tyCam, tzCam float32
+	var visible []gridCell
+	useGridCulling := false
 	if c.flyMode && c.fly != nil {
 		var vm [9]float64
 		var vtx, vty, vtz float64
@@ -397,13 +409,50 @@ func (c *canvas3d) draw(w, h int) image.Image {
 		txCam = float32(vtx)
 		tyCam = float32(vty)
 		tzCam = float32(vtz)
+		if c.grid != nil {
+			useGridCulling = true
+			aspect := 1.0
+			if h > 0 {
+				aspect = float64(w) / float64(h)
+			}
+			visible = c.grid.visibleCells(extractFrustumPlanes(vm, vtx, vty, vtz, zoom, aspect))
+		}
 	} else {
 		txCam = 0
 		tyCam = 0
 		tzCam = 4.0
 	}
 
-	if nWorkers <= 1 {
+	if useGridCulling {
+		if nWorkers <= 1 || len(visible) < 2 {
+			for _, cell := range visible {
+				hi := cell.start + cell.count
+				projectChunk(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi], pix, stride, w, h,
+					m0, m1, m2, m3, m4, m5, m6, m7, m8,
+					txCam, tyCam, tzCam,
+					zoomF, centerX, centerY, defR, defG, defB)
+			}
+		} else {
+			var wg sync.WaitGroup
+			workerCount := min(nWorkers, len(visible))
+			wg.Add(workerCount)
+			for worker := 0; worker < workerCount; worker++ {
+				worker := worker
+				go func() {
+					defer wg.Done()
+					for i := worker; i < len(visible); i += workerCount {
+						cell := visible[i]
+						hi := cell.start + cell.count
+						projectChunk(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi], pix, stride, w, h,
+							m0, m1, m2, m3, m4, m5, m6, m7, m8,
+							txCam, tyCam, tzCam,
+							zoomF, centerX, centerY, defR, defG, defB)
+					}
+				}()
+			}
+			wg.Wait()
+		}
+	} else if nWorkers <= 1 {
 		projectChunk(xs, ys, zs, rgba, pix, stride, w, h,
 			m0, m1, m2, m3, m4, m5, m6, m7, m8,
 			txCam, tyCam, tzCam,
@@ -811,6 +860,7 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	xs := c.xs
 	ys := c.ys
 	zs := c.zs
+	indices := c.originalIndex
 	c.mu.Unlock()
 
 	m0, m1, m2 := float32(m64[0]), float32(m64[1]), float32(m64[2])
@@ -866,7 +916,7 @@ func (c *canvas3d) Tapped(ev *fyne.PointEvent) {
 	}
 
 	if bestIdx >= 0 && bestDistSq <= maxPickRadiusSq {
-		c.onPointTapped(pts[bestIdx], float64(ev.Position.X), float64(ev.Position.Y))
+		c.onPointTapped(pts[indices[bestIdx]], float64(ev.Position.X), float64(ev.Position.Y))
 	} else if c.onPointCleared != nil {
 		c.onPointCleared()
 	}

@@ -23,10 +23,10 @@ type gridCell struct {
 
 // buildGrid assigns points to cells and reorders SoA arrays so each cell's
 // points are contiguous. Returns the grid and reordered arrays.
-func buildGrid(xs, ys, zs []float32, rgba []uint32) (*spatialGrid, []float32, []float32, []float32, []uint32) {
+func buildGrid(xs, ys, zs []float32, rgba []uint32, indices []int) (*spatialGrid, []float32, []float32, []float32, []uint32, []int) {
 	n := len(xs)
 	if n == 0 {
-		return nil, xs, ys, zs, rgba
+		return nil, xs, ys, zs, rgba, indices
 	}
 
 	// Find bounding box with a small margin.
@@ -113,6 +113,7 @@ func buildGrid(xs, ys, zs []float32, rgba []uint32) (*spatialGrid, []float32, []
 	newYs := make([]float32, n)
 	newZs := make([]float32, n)
 	newRGBA := make([]uint32, n)
+	newIndices := make([]int, n)
 	writePos := [gridSize * gridSize * gridSize]int{}
 	for i := range writePos {
 		writePos[i] = g.cells[i].start
@@ -125,6 +126,7 @@ func buildGrid(xs, ys, zs []float32, rgba []uint32) (*spatialGrid, []float32, []
 		newYs[wp] = ys[i]
 		newZs[wp] = zs[i]
 		newRGBA[wp] = rgba[i]
+		newIndices[wp] = indices[i]
 		writePos[ci]++
 	}
 
@@ -162,7 +164,7 @@ func buildGrid(xs, ys, zs []float32, rgba []uint32) (*spatialGrid, []float32, []
 		c.radius = float32(math.Sqrt(maxR2))
 	}
 
-	return g, newXs, newYs, newZs, newRGBA
+	return g, newXs, newYs, newZs, newRGBA, newIndices
 }
 
 // visibleCells returns indices of cells that intersect the frustum defined
