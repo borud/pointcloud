@@ -193,6 +193,9 @@ type codeGenState struct {
 	scaleUnitScale float64
 	zoomOutFrac    float64
 	upAxis         pointcloud.UpAxis
+	pointSize      int
+	pointRound     bool
+	depthScaled    bool
 }
 
 func generateCode(s codeGenState) string {
@@ -221,6 +224,9 @@ func generateCode(s codeGenState) string {
 		{s.scaleUnit != "", fmt.Sprintf("\tpointcloud.WithScaleUnit(%q),", s.scaleUnit)},
 		{s.scaleUnitScale != 1.0, fmt.Sprintf("\tpointcloud.WithScaleUnitScale(%g),", s.scaleUnitScale)},
 		{s.zoomOutFrac != 0.2, fmt.Sprintf("\tpointcloud.WithMaxZoomOutFraction(%g),", s.zoomOutFrac)},
+		{s.pointSize != 1, fmt.Sprintf("\tpointcloud.WithPointSize(%d),", s.pointSize)},
+		{s.pointRound, "\tpointcloud.WithPointShape(pointcloud.PointRound),"},
+		{s.depthScaled, "\tpointcloud.WithPointSizeMode(pointcloud.PointSizeDepthScaled),"},
 		{s.showFPS, "\tpointcloud.WithFPS(true),"},
 		{s.showFPS && s.fpsColor != (color.RGBA{200, 200, 200, 255}), fmt.Sprintf("\tpointcloud.WithFPSColor(%s),", rgbaCode(s.fpsColor))},
 		{s.showFPS && s.fpsStyle != (fyne.TextStyle{Monospace: true}), fmt.Sprintf("\tpointcloud.WithFPSStyle(%s),", styleCode(s.fpsStyle))},
@@ -313,6 +319,9 @@ func main() {
 	scaleBarColor := color.RGBA{200, 200, 200, 255}
 	scaleUnit := ""
 	scaleUnitScale := 1.0
+	pointSize := 1
+	pointRound := false
+	depthScaled := false
 	var currentNormScale float64
 
 	// Points storage so we can reload after viewer rebuild.
@@ -344,6 +353,17 @@ func main() {
 		)
 		v.SetUpAxis(currentUpAxis)
 		v.SetLODEnabled(lodEnabled)
+		v.SetPointSize(pointSize)
+		shape := pointcloud.PointSquare
+		if pointRound {
+			shape = pointcloud.PointRound
+		}
+		v.SetPointShape(shape)
+		mode := pointcloud.PointSizeFixed
+		if depthScaled {
+			mode = pointcloud.PointSizeDepthScaled
+		}
+		v.SetPointSizeMode(mode)
 		if currentNormScale > 0 {
 			v.SetScale(currentNormScale)
 		}
@@ -639,11 +659,51 @@ func main() {
 	}
 	v.OnFlythroughChanged = onFlythroughChanged
 
+	// Point size: 1px uses the single-pixel fast path; larger values help
+	// sparse clouds read as a solid surface.
+	pointSizeLabel := widget.NewLabel(fmt.Sprintf("WithPointSize: %dpx", pointSize))
+	pointSizeSlider := widget.NewSlider(1, 9)
+	pointSizeSlider.Step = 2
+	pointSizeSlider.Value = float64(pointSize)
+	pointSizeSlider.OnChanged = func(val float64) {
+		// Coalesce repeat events for the same stepped value.
+		if int(val) == pointSize {
+			return
+		}
+		pointSize = int(val)
+		pointSizeLabel.SetText(fmt.Sprintf("WithPointSize: %dpx", pointSize))
+		v.SetPointSize(pointSize)
+	}
+
+	roundCheck := widget.NewCheck("Round points", func(on bool) {
+		pointRound = on
+		shape := pointcloud.PointSquare
+		if on {
+			shape = pointcloud.PointRound
+		}
+		v.SetPointShape(shape)
+	})
+	roundCheck.SetChecked(pointRound)
+
+	depthCheck := widget.NewCheck("Depth-scaled size", func(on bool) {
+		depthScaled = on
+		mode := pointcloud.PointSizeFixed
+		if on {
+			mode = pointcloud.PointSizeDepthScaled
+		}
+		v.SetPointSizeMode(mode)
+	})
+	depthCheck.SetChecked(depthScaled)
+
 	renderSection := widget.NewCard("Rendering", "",
 		container.NewVBox(
 			withTooltip(zupCheck, "Treat Z as up axis (typical for LiDAR and surveying data)"),
 			withTooltip(lodCheck, "Reduce point count during mouse interaction for faster frame rates"),
 			withTooltip(flyCheck, "First-person camera: WASD to move, mouse to look, scroll to adjust speed"),
+			withTooltip(pointSizeLabel, "Point diameter in pixels; 1 keeps the single-pixel fast path"),
+			pointSizeSlider,
+			withTooltip(roundCheck, "Draw enlarged points as discs instead of squares"),
+			withTooltip(depthCheck, "Scale point size by distance: near points larger, far smaller"),
 		),
 	)
 
@@ -724,6 +784,9 @@ func main() {
 		scaleBarColor = color.RGBA{200, 200, 200, 255}
 		scaleUnit = ""
 		scaleUnitScale = 1.0
+		pointSize = 1
+		pointRound = false
+		depthScaled = false
 
 		// Update swatch colors.
 		for _, s := range swatches {
@@ -753,6 +816,10 @@ func main() {
 		zupCheck.SetChecked(true)
 		lodCheck.SetChecked(false)
 		flyCheck.SetChecked(false)
+		pointSizeSlider.SetValue(1)
+		pointSizeLabel.SetText("WithPointSize: 1px")
+		roundCheck.SetChecked(false)
+		depthCheck.SetChecked(false)
 
 		rebuildViewer()
 	})
@@ -778,6 +845,9 @@ func main() {
 			scaleUnitScale: scaleUnitScale,
 			zoomOutFrac:    zoomOutFraction,
 			upAxis:         currentUpAxis,
+			pointSize:      pointSize,
+			pointRound:     pointRound,
+			depthScaled:    depthScaled,
 		})
 
 		codeEntry := widget.NewMultiLineEntry()

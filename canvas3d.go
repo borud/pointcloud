@@ -6,6 +6,7 @@ import (
 	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -50,6 +51,14 @@ type canvas3d struct {
 	pointShape    PointShape
 	pointSizeMode PointSizeMode
 
+	// Antialiasing coverage stamps for round points, indexed by pixel radius
+	// (see buildStamps). Rebuilt lazily in draw() when the point settings
+	// change — never on the setter's goroutine — so toggling round or
+	// depth-scaled mode never blocks the UI thread building the LUT.
+	stamps     [][]uint8
+	stampsSize int
+	stampsMode PointSizeMode
+
 	// Flythrough mode.
 	flyMode             bool
 	fly                 *flythroughCamera
@@ -93,6 +102,19 @@ type canvas3d struct {
 	// Last rendered pixel dimensions (set by draw, read by Tapped).
 	lastPixW, lastPixH int
 
+	// uiGoroutine is the ID of the goroutine that paints (captured in draw).
+	// Fyne dispatches input events and painting on the same (main) goroutine,
+	// so refresh() uses this to repaint inline when a setter is called from a
+	// UI event handler, avoiding a deferred round-trip through fyne.Do.
+	uiGoroutine atomic.Uint64
+
+	// drawWG and dp are reused across frames to await the projection workers
+	// and share their parameters without a per-frame heap allocation. draw is
+	// never re-entered concurrently — Fyne paints serially, and drawWG.Wait
+	// returns before draw does — so reuse is safe.
+	drawWG sync.WaitGroup
+	dp     drawParams
+
 	onOrientationChanged func()
 	onHomeView           func()
 	onZoomChanged        func()
@@ -127,6 +149,38 @@ func newCanvas3D(cfg *config) *canvas3d {
 	c.raster = canvas.NewRaster(c.draw)
 	c.ExtendBaseWidget(c)
 	return c
+}
+
+// refresh repaints the canvas. When called from the UI goroutine — e.g. inside a
+// widget event handler such as a slider's OnChanged — it repaints inline. From
+// any other goroutine it hops to the UI goroutine via fyne.Do. This matters
+// because fyne.Do always defers the work through a queue drained on a later
+// main-loop turn, so calling it from the UI goroutine (as the point-size and
+// other setters used to) makes control-driven updates feel sluggish.
+func (c *canvas3d) refresh() {
+	if id := c.uiGoroutine.Load(); id != 0 && goroutineID() == id {
+		c.raster.Refresh()
+		return
+	}
+	fyne.Do(func() { c.raster.Refresh() })
+}
+
+// goroutineID returns the current goroutine's numeric ID by parsing the header
+// of runtime.Stack ("goroutine 123 [running]:..."). Fyne detects its main
+// goroutine the same way; there is no public API for it. Only used off the hot
+// path (setters and once per frame), so the small cost is irrelevant.
+func goroutineID() uint64 {
+	var buf [32]byte
+	n := runtime.Stack(buf[:], false)
+	// Skip the fixed "goroutine " prefix (10 bytes), then read digits.
+	var id uint64
+	for _, ch := range buf[10:n] {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		id = id*10 + uint64(ch-'0')
+	}
+	return id
 }
 
 // minZoom returns the minimum zoom level that keeps the point cloud visible
@@ -324,6 +378,12 @@ func (c *canvas3d) CreateRenderer() fyne.WidgetRenderer {
 func (c *canvas3d) draw(w, h int) image.Image {
 	drawStart := time.Now()
 	c.lastPixW, c.lastPixH = w, h
+	// Record the paint goroutine once so refresh() can repaint inline when a
+	// setter is invoked from a UI event handler (same goroutine). Guarded so
+	// goroutineID (which allocates) runs only until the ID is captured.
+	if c.uiGoroutine.Load() == 0 {
+		c.uiGoroutine.Store(goroutineID())
+	}
 
 	// Reuse the framebuffer across frames; only reallocate on resize.
 	if c.framebuffer == nil ||
@@ -345,7 +405,6 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	bg := c.bgColor
 
 	// Use LOD arrays during interaction for responsive frame rates.
-	// Use LOD arrays during interaction for responsive frame rates.
 	// In flythrough mode, skip LOD — the grid-reordered full arrays
 	// are needed and frustum culling provides the perf benefit instead.
 	xs := c.xs
@@ -364,6 +423,21 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	pointSize := c.pointSize
 	pointShape := c.pointShape
 	pointSizeMode := c.pointSizeMode
+	// Lazily (re)build the antialiasing coverage stamps for round points on
+	// the first redraw after the settings change. Done here, on the draw
+	// goroutine, so toggling round/depth-scaled mode never stalls the UI
+	// thread building the (per-radius) lookup table.
+	if pointShape == PointRound &&
+		(c.stamps == nil || c.stampsSize != pointSize || c.stampsMode != pointSizeMode) {
+		maxR := (pointSize - 1) / 2
+		if pointSizeMode == PointSizeDepthScaled {
+			maxR = pointSize * 2
+		}
+		c.stamps = buildStamps(maxR)
+		c.stampsSize = pointSize
+		c.stampsMode = pointSizeMode
+	}
+	stamps := c.stamps
 	c.mu.Unlock()
 
 	// Rebuild the clear template when the framebuffer size or bg color changes.
@@ -442,53 +516,45 @@ func (c *canvas3d) draw(w, h int) image.Image {
 		tzCam = 4.0
 	}
 
-	// Dispatch once per chunk (not per point). The unset case (pointSize 1,
-	// fixed mode) calls the original single-pixel projectChunk verbatim, so
-	// its hot loop and generated code are unchanged — no performance cost.
-	sized := pointSize > 1 || pointSizeMode == PointSizeDepthScaled
-	project := func(xs, ys, zs []float32, rgba []uint32) {
-		if !sized {
-			projectChunk(xs, ys, zs, rgba, pix, stride, w, h,
-				m0, m1, m2, m3, m4, m5, m6, m7, m8,
-				txCam, tyCam, tzCam,
-				zoomF, centerX, centerY, defR, defG, defB)
-			return
-		}
-		projectChunkSized(xs, ys, zs, rgba, pix, stride, w, h,
-			m0, m1, m2, m3, m4, m5, m6, m7, m8,
-			txCam, tyCam, tzCam,
-			zoomF, centerX, centerY, defR, defG, defB,
-			pointSize, pointShape, pointSizeMode)
+	// Bundle the per-frame projection parameters so worker goroutines receive
+	// them by value instead of capturing a closure. Passing a plain struct to a
+	// top-level worker keeps xs/ys/zs/rgba and the parameters on the stack — no
+	// per-frame closure or escaped-variable heap allocations. The unset case
+	// (pointSize 1, fixed mode) still runs projectChunk verbatim; see
+	// projectSlice.
+	c.dp = drawParams{
+		xs: xs, ys: ys, zs: zs, rgba: rgba,
+		pix: pix, stride: stride, w: w, h: h,
+		m0: m0, m1: m1, m2: m2, m3: m3, m4: m4, m5: m5, m6: m6, m7: m7, m8: m8,
+		txCam: txCam, tyCam: tyCam, tzCam: tzCam,
+		zoomF: zoomF, centerX: centerX, centerY: centerY,
+		defR: defR, defG: defG, defB: defB,
+		sized:         pointSize > 1 || pointSizeMode == PointSizeDepthScaled,
+		pointSize:     pointSize,
+		pointShape:    pointShape,
+		pointSizeMode: pointSizeMode,
+		stamps:        stamps,
 	}
+	p := &c.dp
 
 	if useGridCulling {
 		if nWorkers <= 1 || len(visible) < 2 {
 			for _, cell := range visible {
 				hi := cell.start + cell.count
-				project(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi])
+				projectSlice(p, xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi])
 			}
 		} else {
-			var wg sync.WaitGroup
 			workerCount := min(nWorkers, len(visible))
-			wg.Add(workerCount)
-			for worker := 0; worker < workerCount; worker++ {
-				worker := worker
-				go func() {
-					defer wg.Done()
-					for i := worker; i < len(visible); i += workerCount {
-						cell := visible[i]
-						hi := cell.start + cell.count
-						project(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi])
-					}
-				}()
+			c.drawWG.Add(workerCount)
+			for worker := range workerCount {
+				go projectCellsWorker(&c.drawWG, p, visible, worker, workerCount)
 			}
-			wg.Wait()
+			c.drawWG.Wait()
 		}
 	} else if nWorkers <= 1 {
-		project(xs, ys, zs, rgba)
+		projectSlice(p, xs, ys, zs, rgba)
 	} else {
-		var wg sync.WaitGroup
-		wg.Add(nWorkers)
+		c.drawWG.Add(nWorkers)
 		chunkSize := (n + nWorkers - 1) / nWorkers
 		for t := range nWorkers {
 			lo := t * chunkSize
@@ -496,12 +562,9 @@ func (c *canvas3d) draw(w, h int) image.Image {
 			if hi > n {
 				hi = n
 			}
-			go func() {
-				defer wg.Done()
-				project(xs[lo:hi], ys[lo:hi], zs[lo:hi], rgba[lo:hi])
-			}()
+			go projectRangeWorker(&c.drawWG, p, lo, hi)
 		}
-		wg.Wait()
+		c.drawWG.Wait()
 	}
 
 	if c.onFrameDrawn != nil {
@@ -509,6 +572,63 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	}
 
 	return img
+}
+
+// drawParams bundles the per-frame projection parameters and point arrays. It
+// is heap-allocated once per frame and shared by pointer with every worker, so
+// the hot dispatch costs a single small allocation instead of a capturing
+// closure (and escaped locals) per worker.
+type drawParams struct {
+	xs, ys, zs                     []float32
+	rgba                           []uint32
+	pix                            []byte
+	stride, w, h                   int
+	m0, m1, m2, m3, m4, m5, m6, m7 float32
+	m8                             float32
+	txCam, tyCam, tzCam            float32
+	zoomF, centerX, centerY        float32
+	defR, defG, defB               float32
+	sized                          bool
+	pointSize                      int
+	pointShape                     PointShape
+	pointSizeMode                  PointSizeMode
+	stamps                         [][]uint8
+}
+
+// projectSlice projects one contiguous span of points. The unset case (single
+// pixel, fixed size) dispatches to projectChunk verbatim so its hot loop and
+// generated code are unchanged; larger or depth-scaled points take the enlarged
+// path. The dispatch decision is made once per span, never per point.
+func projectSlice(p *drawParams, xs, ys, zs []float32, rgba []uint32) {
+	if !p.sized {
+		projectChunk(xs, ys, zs, rgba, p.pix, p.stride, p.w, p.h,
+			p.m0, p.m1, p.m2, p.m3, p.m4, p.m5, p.m6, p.m7, p.m8,
+			p.txCam, p.tyCam, p.tzCam,
+			p.zoomF, p.centerX, p.centerY, p.defR, p.defG, p.defB)
+		return
+	}
+	projectChunkSized(xs, ys, zs, rgba, p.pix, p.stride, p.w, p.h,
+		p.m0, p.m1, p.m2, p.m3, p.m4, p.m5, p.m6, p.m7, p.m8,
+		p.txCam, p.tyCam, p.tzCam,
+		p.zoomF, p.centerX, p.centerY, p.defR, p.defG, p.defB,
+		p.pointSize, p.pointShape, p.pointSizeMode, p.stamps)
+}
+
+// projectRangeWorker projects the points in [lo,hi) for one parallel worker.
+func projectRangeWorker(wg *sync.WaitGroup, p *drawParams, lo, hi int) {
+	defer wg.Done()
+	projectSlice(p, p.xs[lo:hi], p.ys[lo:hi], p.zs[lo:hi], p.rgba[lo:hi])
+}
+
+// projectCellsWorker projects the visible grid cells assigned to this worker,
+// striding by step so the workers partition the cells without coordination.
+func projectCellsWorker(wg *sync.WaitGroup, p *drawParams, cells []gridCell, worker, step int) {
+	defer wg.Done()
+	for i := worker; i < len(cells); i += step {
+		cell := cells[i]
+		hi := cell.start + cell.count
+		projectSlice(p, p.xs[cell.start:hi], p.ys[cell.start:hi], p.zs[cell.start:hi], p.rgba[cell.start:hi])
+	}
 }
 
 // projectChunk projects a contiguous slice of points and writes pixels to the
@@ -582,8 +702,14 @@ func projectChunk(
 // pointSize is the pixel diameter. The pixel radius is (pointSize-1)/2, so even
 // diameters round down to the nearest odd size. In PointSizeDepthScaled mode
 // the radius additionally scales with 1/depth, giving a roughly constant
-// world-space size (near points larger, far points smaller), clamped so a point
-// at the camera cannot fill the frame.
+// world-space size (near points larger, far points smaller), capped at
+// pointSize*2 to bound overdraw for points near the camera.
+//
+// For PointRound, stamps carries precomputed antialiasing coverage masks indexed
+// by radius (see buildStamps): edge pixels are alpha-blended so the disc has a
+// smooth outline. Square points, and the fully covered interior of round points,
+// still take the cheap opaque store. If stamps is nil the round path falls back
+// to a hard-edged (aliased) disc.
 func projectChunkSized(
 	xs, ys, zs []float32, rgba []uint32, pix []byte, stride, w, h int,
 	m0, m1, m2, m3, m4, m5, m6, m7, m8 float32,
@@ -591,12 +717,13 @@ func projectChunkSized(
 	zoomF, centerX, centerY float32,
 	defR, defG, defB float32,
 	pointSize int, shape PointShape, mode PointSizeMode,
+	stamps [][]uint8,
 ) {
 	fixedR := (pointSize - 1) / 2
 	round := shape == PointRound
 	depthScaled := mode == PointSizeDepthScaled
 	baseR := float32(pointSize) / 2
-	maxR := pointSize * 4 // cap runaway size for points near the camera
+	maxR := pointSize * 2 // cap size near the camera to bound overdraw
 
 	for i, px := range xs {
 		py := ys[i]
@@ -660,6 +787,12 @@ func projectChunkSized(
 			continue
 		}
 
+		// Antialiased round points: composite the precomputed coverage mask.
+		if round && stamps != nil && rad < len(stamps) && stamps[rad] != nil {
+			blendStamp(pix, stride, w, h, ix, iy, rad, stamps[rad], pv)
+			continue
+		}
+
 		// Clamp the splat box to the framebuffer once, then fill it.
 		x0, x1 := ix-rad, ix+rad
 		y0, y1 := iy-rad, iy+rad
@@ -692,6 +825,81 @@ func projectChunkSized(
 			}
 		}
 	}
+}
+
+// blendStamp composites a point of color pv into the framebuffer using a
+// precomputed coverage mask (0..255 per pixel). Fully covered pixels take the
+// cheap opaque store; partially covered edge pixels are alpha-blended over the
+// existing pixel so the round outline is antialiased. Like the rest of the
+// renderer these are racy stores across workers, but a torn blend is still a
+// valid color, matching the existing benign-race tolerance.
+func blendStamp(pix []byte, stride, w, h, ix, iy, rad int, stamp []uint8, pv uint32) {
+	n := 2*rad + 1
+	sr := pv & 0xFF
+	sg := (pv >> 8) & 0xFF
+	sb := (pv >> 16) & 0xFF
+	for sy := range n {
+		y := iy + sy - rad
+		if y < 0 || y >= h {
+			continue
+		}
+		rowOff := y * stride
+		row := sy * n
+		for sx := range n {
+			a := uint32(stamp[row+sx])
+			if a == 0 {
+				continue
+			}
+			x := ix + sx - rad
+			if x < 0 || x >= w {
+				continue
+			}
+			off := rowOff + x*4
+			if a == 255 {
+				*(*uint32)(unsafe.Pointer(&pix[off])) = pv
+				continue
+			}
+			dst := *(*uint32)(unsafe.Pointer(&pix[off]))
+			inv := 255 - a
+			nr := (sr*a + (dst&0xFF)*inv) / 255
+			ng := (sg*a + (dst>>8&0xFF)*inv) / 255
+			nb := (sb*a + (dst>>16&0xFF)*inv) / 255
+			*(*uint32)(unsafe.Pointer(&pix[off])) = nr | ng<<8 | nb<<16 | 0xFF000000
+		}
+	}
+}
+
+// buildStamps precomputes antialiasing coverage masks for round points, one per
+// integer pixel radius from 1..maxR. stamps[r] is a (2r+1)×(2r+1) row-major mask
+// whose bytes give each pixel's fractional coverage (0..255) by a disc of radius
+// r+0.5, estimated with 4×4 supersampling. stamps[0] is nil — a radius-0 point is
+// a single pixel and never blended. Built once and cached; see canvas3d.draw.
+func buildStamps(maxR int) [][]uint8 {
+	const ss = 4
+	stamps := make([][]uint8, maxR+1)
+	for r := 1; r <= maxR; r++ {
+		n := 2*r + 1
+		s := make([]uint8, n*n)
+		rr := float64(r) + 0.5
+		rr2 := rr * rr
+		for dy := -r; dy <= r; dy++ {
+			for dx := -r; dx <= r; dx++ {
+				hits := 0
+				for syi := range ss {
+					for sxi := range ss {
+						fx := float64(dx) + (float64(sxi)+0.5)/ss - 0.5
+						fy := float64(dy) + (float64(syi)+0.5)/ss - 0.5
+						if fx*fx+fy*fy <= rr2 {
+							hits++
+						}
+					}
+				}
+				s[(dy+r)*n+(dx+r)] = uint8(hits * 255 / (ss * ss))
+			}
+		}
+		stamps[r] = s
+	}
+	return stamps
 }
 
 func arcballVector(mx, my, w, h float64) [3]float64 {

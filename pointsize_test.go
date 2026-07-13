@@ -33,7 +33,7 @@ func TestProjectChunkSized(t *testing.T) {
 			1, 0, 0, 0, 1, 0, 0, 0, 1,
 			0, 0, 4.0,
 			1.0, cx, cy, 255, 255, 255,
-			size, shape, mode)
+			size, shape, mode, nil)
 		return countLit(pix)
 	}
 
@@ -55,5 +55,38 @@ func TestProjectChunkSized(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: got %d lit pixels, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestBlendStampAntialiased verifies that compositing a coverage stamp yields
+// both fully covered interior pixels and partially covered (antialiased) edge
+// pixels — the hard-disc path would produce only 0 or 255.
+func TestBlendStampAntialiased(t *testing.T) {
+	const w, h = 64, 64
+	stride := w * 4
+	pix := make([]byte, w*h*4)
+
+	stamps := buildStamps(6)
+	if stamps[4] == nil {
+		t.Fatal("buildStamps did not produce a radius-4 stamp")
+	}
+
+	// White opaque point at the center, radius 4, over a black framebuffer.
+	blendStamp(pix, stride, w, h, 32, 32, 4, stamps[4], 0xFFFFFFFF)
+
+	full, partial := 0, 0
+	for i := 0; i < len(pix); i += 4 {
+		switch v := pix[i]; {
+		case v == 255:
+			full++
+		case v > 0:
+			partial++
+		}
+	}
+	if full == 0 {
+		t.Error("expected fully covered interior pixels")
+	}
+	if partial == 0 {
+		t.Error("expected partially covered (antialiased) edge pixels")
 	}
 }

@@ -323,7 +323,7 @@ func (v *Viewer) SetPointsPreserveView(pts []Point3D) {
 	v.canvas.points = pts
 	v.canvas.convertToSoA()
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetUpAxis sets the up-axis convention used for rendering.
@@ -334,7 +334,7 @@ func (v *Viewer) SetUpAxis(up UpAxis) {
 	v.canvas.up = up
 	v.canvas.convertToSoA()
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // GetUpAxis returns the current up-axis setting.
@@ -378,7 +378,7 @@ func (v *Viewer) SetDefaultPointColor(c color.RGBA) {
 	v.canvas.mu.Lock()
 	v.canvas.defaultPointColor = c
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetPointSize sets the point diameter in pixels at runtime. A size of 1
@@ -391,7 +391,7 @@ func (v *Viewer) SetPointSize(px int) {
 	v.canvas.mu.Lock()
 	v.canvas.pointSize = px
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetPointShape sets whether enlarged points are drawn square or round at
@@ -400,7 +400,7 @@ func (v *Viewer) SetPointShape(s PointShape) {
 	v.canvas.mu.Lock()
 	v.canvas.pointShape = s
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetPointSizeMode sets whether point size is fixed or scaled by depth at
@@ -409,7 +409,7 @@ func (v *Viewer) SetPointSizeMode(m PointSizeMode) {
 	v.canvas.mu.Lock()
 	v.canvas.pointSizeMode = m
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetCubeColors updates the orientation cube colors at runtime.
@@ -500,7 +500,7 @@ func (v *Viewer) SetZoom(z float64) {
 	v.canvas.mu.Lock()
 	v.canvas.zoom = z
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // Pan returns the current pan offset in Fyne DIP units.
@@ -516,7 +516,7 @@ func (v *Viewer) SetPan(x, y float64) {
 	v.canvas.panX = x
 	v.canvas.panY = y
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // Orientation returns the current view orientation as a quaternion.
@@ -533,7 +533,7 @@ func (v *Viewer) SetBackgroundColor(c color.RGBA) {
 	v.canvas.bgColor = c
 	v.canvas.clearTemplate = nil // force rebuild on next draw
 	v.canvas.mu.Unlock()
-	fyne.Do(func() { v.canvas.raster.Refresh() })
+	v.canvas.refresh()
 }
 
 // SetLODEnabled enables or disables LOD (level-of-detail) decimation during
