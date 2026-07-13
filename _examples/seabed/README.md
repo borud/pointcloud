@@ -11,6 +11,12 @@ each time.
 
 ## controls
 
+- Size -- point diameter in pixels (1–9). At 1 the renderer uses its
+  single-pixel fast path; larger values make a sparse cloud read as a
+  solid surface.
+- Round -- draws enlarged points as discs instead of squares.
+- Depth -- scales point size by distance (near points larger, far
+  smaller) instead of a fixed size.
 - Height -- adjusts terrain relief without regenerating. Crank it down
   for a nearly flat ocean floor or up for exaggerated peaks.
 - Points -- log-scale slider from 100K to 50M. Set the value and hit

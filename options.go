@@ -35,7 +35,31 @@ type config struct {
 	fpsSize              *float32
 	showFlythroughButton *bool
 	flythroughEnabled    *bool
+	pointSize            *int
+	pointShape           *PointShape
+	pointSizeMode        *PointSizeMode
 }
+
+// PointShape selects how a point larger than one pixel is rasterized.
+type PointShape int
+
+const (
+	// PointSquare fills an N×N block of pixels. Cheapest.
+	PointSquare PointShape = iota
+	// PointRound fills a disc of diameter N (skips corner pixels).
+	PointRound
+)
+
+// PointSizeMode selects how point size is derived per point.
+type PointSizeMode int
+
+const (
+	// PointSizeFixed gives every point the same on-screen size.
+	PointSizeFixed PointSizeMode = iota
+	// PointSizeDepthScaled scales size with depth: near points render larger,
+	// far points smaller, approximating a constant world-space radius.
+	PointSizeDepthScaled
+)
 
 // CubeColors configures the colors of the orientation cube.
 type CubeColors struct {
@@ -226,4 +250,31 @@ func WithFlythroughButton(show bool) Option {
 // WithFlythroughEnabled sets whether flythrough mode is initially active.
 func WithFlythroughEnabled(on bool) Option {
 	return func(cfg *config) { cfg.flythroughEnabled = &on }
+}
+
+// WithPointSize sets the point diameter in pixels. The default is 1 (a single
+// pixel), which preserves the original single-pixel fast path. Even diameters
+// round down to the nearest odd size. Useful for sparse clouds where 1-pixel
+// points are hard to see.
+func WithPointSize(px int) Option {
+	return func(cfg *config) { cfg.pointSize = &px }
+}
+
+// WithPointShape sets whether enlarged points are drawn square or round.
+// The default is PointSquare. Has no visible effect at point size 1.
+func WithPointShape(s PointShape) Option {
+	return func(cfg *config) { cfg.pointShape = &s }
+}
+
+// WithPointSizeMode sets whether point size is fixed or scaled by depth.
+// The default is PointSizeFixed.
+func WithPointSizeMode(m PointSizeMode) Option {
+	return func(cfg *config) { cfg.pointSizeMode = &m }
+}
+
+func intOr(p *int, def int) int {
+	if p != nil {
+		return *p
+	}
+	return def
 }

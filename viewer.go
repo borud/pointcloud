@@ -381,6 +381,37 @@ func (v *Viewer) SetDefaultPointColor(c color.RGBA) {
 	fyne.Do(func() { v.canvas.raster.Refresh() })
 }
 
+// SetPointSize sets the point diameter in pixels at runtime. A size of 1
+// selects the single-pixel fast path. Even diameters round down to the nearest
+// odd size. Values below 1 are clamped to 1.
+func (v *Viewer) SetPointSize(px int) {
+	if px < 1 {
+		px = 1
+	}
+	v.canvas.mu.Lock()
+	v.canvas.pointSize = px
+	v.canvas.mu.Unlock()
+	fyne.Do(func() { v.canvas.raster.Refresh() })
+}
+
+// SetPointShape sets whether enlarged points are drawn square or round at
+// runtime. Has no visible effect at point size 1.
+func (v *Viewer) SetPointShape(s PointShape) {
+	v.canvas.mu.Lock()
+	v.canvas.pointShape = s
+	v.canvas.mu.Unlock()
+	fyne.Do(func() { v.canvas.raster.Refresh() })
+}
+
+// SetPointSizeMode sets whether point size is fixed or scaled by depth at
+// runtime.
+func (v *Viewer) SetPointSizeMode(m PointSizeMode) {
+	v.canvas.mu.Lock()
+	v.canvas.pointSizeMode = m
+	v.canvas.mu.Unlock()
+	fyne.Do(func() { v.canvas.raster.Refresh() })
+}
+
 // SetCubeColors updates the orientation cube colors at runtime.
 // Has no effect if the cube was hidden via WithOrientationCube(false).
 func (v *Viewer) SetCubeColors(cc CubeColors) {

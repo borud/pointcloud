@@ -155,6 +155,37 @@ func main() {
 		pointsLabel.SetText(fmt.Sprintf("Points: %s", formatCount(n)))
 	}
 
+	// --- Point size: 1 – 9 px, with shape and depth-scaling toggles ---
+	// 1px points can vanish on a sparse seabed; enlarging them makes the
+	// surface read as a solid sheet. Size 1 keeps the single-pixel fast path.
+	pointSize := 1
+	sizeLabel := widget.NewLabel(fmt.Sprintf("Size: %dpx", pointSize))
+	sizeLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	sizeSlider := widget.NewSlider(1, 9)
+	sizeSlider.Step = 2
+	sizeSlider.Value = float64(pointSize)
+	sizeSlider.OnChanged = func(val float64) {
+		pointSize = int(val)
+		sizeLabel.SetText(fmt.Sprintf("Size: %dpx", pointSize))
+		viewer.SetPointSize(pointSize)
+	}
+
+	roundCheck := widget.NewCheck("Round", func(on bool) {
+		if on {
+			viewer.SetPointShape(pointcloud.PointRound)
+			return
+		}
+		viewer.SetPointShape(pointcloud.PointSquare)
+	})
+
+	depthCheck := widget.NewCheck("Depth", func(on bool) {
+		if on {
+			viewer.SetPointSizeMode(pointcloud.PointSizeDepthScaled)
+			return
+		}
+		viewer.SetPointSizeMode(pointcloud.PointSizeFixed)
+	})
+
 	generate := func() {
 		if !generating.CompareAndSwap(false, true) {
 			return
@@ -183,12 +214,14 @@ func main() {
 
 	heightSized := container.New(newMinWidthLayout(250), heightSlider)
 	pointsSized := container.New(newMinWidthLayout(250), pointsSlider)
+	sizeSized := container.New(newMinWidthLayout(120), sizeSlider)
 
 	bottomBar := container.NewBorder(
 		nil, nil,
 		statusLabel,
 		container.NewHBox(
 			fpsCheck,
+			sizeLabel, sizeSized, roundCheck, depthCheck,
 			heightLabel, heightSized,
 			pointsLabel, pointsSized,
 			regenBtn,

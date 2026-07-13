@@ -43,6 +43,13 @@ type canvas3d struct {
 	homeOrientation    Quat
 	maxZoomOutFraction float64
 
+	// Point rendering. pointSize is the pixel diameter; 1 selects the
+	// single-pixel fast path (projectChunk). Larger values, or a
+	// depth-scaled mode, route to projectChunkSized.
+	pointSize     int
+	pointShape    PointShape
+	pointSizeMode PointSizeMode
+
 	// Flythrough mode.
 	flyMode             bool
 	fly                 *flythroughCamera
@@ -105,8 +112,17 @@ func newCanvas3D(cfg *config) *canvas3d {
 		defaultPointColor:  colorOr(cfg.defaultPointColor, color.RGBA{255, 150, 255, 255}),
 		homeOrientation:    homeOr,
 		maxZoomOutFraction: float64Or(cfg.maxZoomOutFraction, 0.2),
+		pointSize:          intOr(cfg.pointSize, 1),
 		lodEnabled:         true,
 		lodTargetSize:      200_000,
+	}
+	// pointShape and pointSizeMode default to their zero values (PointSquare,
+	// PointSizeFixed); override only when the option was supplied.
+	if cfg.pointShape != nil {
+		c.pointShape = *cfg.pointShape
+	}
+	if cfg.pointSizeMode != nil {
+		c.pointSizeMode = *cfg.pointSizeMode
 	}
 	c.raster = canvas.NewRaster(c.draw)
 	c.ExtendBaseWidget(c)
@@ -345,6 +361,9 @@ func (c *canvas3d) draw(w, h int) image.Image {
 	defR := float32(c.defaultPointColor.R)
 	defG := float32(c.defaultPointColor.G)
 	defB := float32(c.defaultPointColor.B)
+	pointSize := c.pointSize
+	pointShape := c.pointShape
+	pointSizeMode := c.pointSizeMode
 	c.mu.Unlock()
 
 	// Rebuild the clear template when the framebuffer size or bg color changes.
@@ -423,14 +442,30 @@ func (c *canvas3d) draw(w, h int) image.Image {
 		tzCam = 4.0
 	}
 
+	// Dispatch once per chunk (not per point). The unset case (pointSize 1,
+	// fixed mode) calls the original single-pixel projectChunk verbatim, so
+	// its hot loop and generated code are unchanged — no performance cost.
+	sized := pointSize > 1 || pointSizeMode == PointSizeDepthScaled
+	project := func(xs, ys, zs []float32, rgba []uint32) {
+		if !sized {
+			projectChunk(xs, ys, zs, rgba, pix, stride, w, h,
+				m0, m1, m2, m3, m4, m5, m6, m7, m8,
+				txCam, tyCam, tzCam,
+				zoomF, centerX, centerY, defR, defG, defB)
+			return
+		}
+		projectChunkSized(xs, ys, zs, rgba, pix, stride, w, h,
+			m0, m1, m2, m3, m4, m5, m6, m7, m8,
+			txCam, tyCam, tzCam,
+			zoomF, centerX, centerY, defR, defG, defB,
+			pointSize, pointShape, pointSizeMode)
+	}
+
 	if useGridCulling {
 		if nWorkers <= 1 || len(visible) < 2 {
 			for _, cell := range visible {
 				hi := cell.start + cell.count
-				projectChunk(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi], pix, stride, w, h,
-					m0, m1, m2, m3, m4, m5, m6, m7, m8,
-					txCam, tyCam, tzCam,
-					zoomF, centerX, centerY, defR, defG, defB)
+				project(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi])
 			}
 		} else {
 			var wg sync.WaitGroup
@@ -443,20 +478,14 @@ func (c *canvas3d) draw(w, h int) image.Image {
 					for i := worker; i < len(visible); i += workerCount {
 						cell := visible[i]
 						hi := cell.start + cell.count
-						projectChunk(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi], pix, stride, w, h,
-							m0, m1, m2, m3, m4, m5, m6, m7, m8,
-							txCam, tyCam, tzCam,
-							zoomF, centerX, centerY, defR, defG, defB)
+						project(xs[cell.start:hi], ys[cell.start:hi], zs[cell.start:hi], rgba[cell.start:hi])
 					}
 				}()
 			}
 			wg.Wait()
 		}
 	} else if nWorkers <= 1 {
-		projectChunk(xs, ys, zs, rgba, pix, stride, w, h,
-			m0, m1, m2, m3, m4, m5, m6, m7, m8,
-			txCam, tyCam, tzCam,
-			zoomF, centerX, centerY, defR, defG, defB)
+		project(xs, ys, zs, rgba)
 	} else {
 		var wg sync.WaitGroup
 		wg.Add(nWorkers)
@@ -469,11 +498,7 @@ func (c *canvas3d) draw(w, h int) image.Image {
 			}
 			go func() {
 				defer wg.Done()
-				projectChunk(xs[lo:hi], ys[lo:hi], zs[lo:hi], rgba[lo:hi],
-					pix, stride, w, h,
-					m0, m1, m2, m3, m4, m5, m6, m7, m8,
-					txCam, tyCam, tzCam,
-					zoomF, centerX, centerY, defR, defG, defB)
+				project(xs[lo:hi], ys[lo:hi], zs[lo:hi], rgba[lo:hi])
 			}()
 		}
 		wg.Wait()
@@ -547,6 +572,125 @@ func projectChunk(
 		// Single 32-bit store (little-endian: R at low byte).
 		*(*uint32)(unsafe.Pointer(&pix[off])) =
 			uint32(r) | uint32(g)<<8 | uint32(b)<<16 | 0xFF000000
+	}
+}
+
+// projectChunkSized is the enlarged-point variant of projectChunk. It is only
+// reached when the point size exceeds one pixel or a depth-scaled mode is
+// active, so its extra per-point work never touches the default fast path.
+//
+// pointSize is the pixel diameter. The pixel radius is (pointSize-1)/2, so even
+// diameters round down to the nearest odd size. In PointSizeDepthScaled mode
+// the radius additionally scales with 1/depth, giving a roughly constant
+// world-space size (near points larger, far points smaller), clamped so a point
+// at the camera cannot fill the frame.
+func projectChunkSized(
+	xs, ys, zs []float32, rgba []uint32, pix []byte, stride, w, h int,
+	m0, m1, m2, m3, m4, m5, m6, m7, m8 float32,
+	tx, ty, tz float32,
+	zoomF, centerX, centerY float32,
+	defR, defG, defB float32,
+	pointSize int, shape PointShape, mode PointSizeMode,
+) {
+	fixedR := (pointSize - 1) / 2
+	round := shape == PointRound
+	depthScaled := mode == PointSizeDepthScaled
+	baseR := float32(pointSize) / 2
+	maxR := pointSize * 4 // cap runaway size for points near the camera
+
+	for i, px := range xs {
+		py := ys[i]
+		pz := zs[i]
+
+		rx := m0*px + m1*py + m2*pz + tx
+		ry := m3*px + m4*py + m5*pz + ty
+		rz := m6*px + m7*py + m8*pz
+
+		dist := tz - rz
+		if dist < 0.1 {
+			continue
+		}
+		invDist := 1.0 / dist
+		projX := rx*invDist*zoomF + centerX
+		projY := ry*invDist*zoomF + centerY
+
+		ix, iy := int(projX), int(projY)
+		if ix < 0 || ix >= w || iy < 0 || iy >= h {
+			continue
+		}
+
+		packed := rgba[i]
+
+		// Depth-based shading: use camera-space depth for consistent
+		// shading in both orbit and flythrough modes.
+		shade := 1.0 - (tz-dist)*0.15
+		if shade < 0.3 {
+			shade = 0.3
+		} else if shade > 1.0 {
+			shade = 1.0
+		}
+
+		var r, g, b uint8
+		if packed&hasColorBit != 0 {
+			r = uint8(float32(packed>>16&0xFF) * shade)
+			g = uint8(float32(packed>>8&0xFF) * shade)
+			b = uint8(float32(packed&0xFF) * shade)
+		} else {
+			r = uint8(defR * shade)
+			g = uint8(defG * shade)
+			b = uint8(defB * shade)
+		}
+		pv := uint32(r) | uint32(g)<<8 | uint32(b)<<16 | 0xFF000000
+
+		rad := fixedR
+		if depthScaled {
+			// tz*invDist == 1 at the rotation center, so a point there gets
+			// baseR; nearer points scale up, farther points down.
+			rad = int(baseR * tz * invDist)
+			if rad > maxR {
+				rad = maxR
+			}
+		}
+
+		// Radius 0 collapses to a single pixel (common for far depth-scaled
+		// points) — take the same cheap store as the fast path.
+		if rad == 0 {
+			off := iy*stride + ix*4
+			*(*uint32)(unsafe.Pointer(&pix[off])) = pv
+			continue
+		}
+
+		// Clamp the splat box to the framebuffer once, then fill it.
+		x0, x1 := ix-rad, ix+rad
+		y0, y1 := iy-rad, iy+rad
+		if x0 < 0 {
+			x0 = 0
+		}
+		if x1 >= w {
+			x1 = w - 1
+		}
+		if y0 < 0 {
+			y0 = 0
+		}
+		if y1 >= h {
+			y1 = h - 1
+		}
+
+		r2 := rad * rad
+		for y := y0; y <= y1; y++ {
+			dy := y - iy
+			rowOff := y * stride
+			for x := x0; x <= x1; x++ {
+				if round {
+					dx := x - ix
+					if dx*dx+dy*dy > r2 {
+						continue
+					}
+				}
+				off := rowOff + x*4
+				*(*uint32)(unsafe.Pointer(&pix[off])) = pv
+			}
+		}
 	}
 }
 
